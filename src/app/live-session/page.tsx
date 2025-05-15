@@ -415,13 +415,20 @@ function LiveSessionPageContent() {
     addLog(`Initial camera state: ${isCameraOn ? 'ON' : 'OFF'}`);
     addLog(`Initial microphone state: ${isMicOn ? 'ON' : 'OFF'}`);
     
+    // Get the socket URL from environment variable or default
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+    addLog(`Connecting to socket server: ${socketUrl}`);
+    
     // 1. Create socket connection
-    const socket = io('https://localhost:3000', {
-      rejectUnauthorized: false,
+    const socket = io(socketUrl, {
       auth: {
         userName: session.user.name || 'Anonymous',
         userId: session.user.id
-      }
+      },
+      transports: ['websocket', 'polling'],
+      forceNew: true,
+      reconnection: true,
+      timeout: 20000
     });
     
     socketRef.current = socket;
