@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f3f4f6; /* Light gray background */
+  --foreground: #1f2937; /* Dark gray text */
+  --primary: #2563eb; /* Vibrant blue */
+  --secondary: #f59e0b; /* Warm orange */
+  --accent: #10b981; /* Soft green */
+  --error: #ef4444; /* Bright red */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a; /* Dark mode background */
+    --foreground: #ededed; /* Light gray text */
+    --primary: #3b82f6; /* Slightly lighter blue for dark mode */
+    --secondary: #fbbf24; /* Slightly lighter orange for dark mode */
+    --accent: #34d399; /* Slightly lighter green for dark mode */
+    --error: #f87171; /* Slightly lighter red for dark mode */
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-poppins), sans-serif; /* Use the Poppins font */
+}
+
+/* Custom utility classes */
+.bg-primary {
+  background-color: var(--primary);
+}
+
+.text-primary {
+  color: var(--primary);
+}
+
+.bg-secondary {
+  background-color: var(--secondary);
+}
+
+.text-secondary {
+  color: var(--secondary);
+}
+
+.bg-accent {
+  background-color: var(--accent);
+}
+
+.text-accent {
+  color: var(--accent);
+}
+
+.bg-error {
+  background-color: var(--error);
+}
+
+.text-error {
+  color: var(--error);
+}
+
+/* Custom button styles */
+button.bg-primary {
+  background-color: var(--primary);
+  color: white;
+  border: 2px solid var(--primary);
+  transition: all 0.3s ease;
+}
+
+button.bg-primary:hover {
+  background-color: white;
+  color: var(--primary);
+}
+
+button.bg-primary:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.5s ease-out forwards;
+}
