@@ -320,13 +320,20 @@ export default function ConnectPage() {
         setConnecting(true);
         setLoadingQueue(true);
         
+        // Get the socket URL from environment variable or default
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+        console.log('Connecting to socket server:', socketUrl);
+        
         // Connect to Socket.io server
-        const socket = io('https://localhost:3000', {
-          rejectUnauthorized: false, // For development only - remove in production
+        const socket = io(socketUrl, {
           auth: {
             userName: session?.user?.name || 'Anonymous',
-            password: 'x', // This matches your server auth setup
-          }
+            userId: session?.user?.id
+          },
+          transports: ['websocket', 'polling'],
+          forceNew: true,
+          reconnection: true,
+          timeout: 20000
         });
         
         socket.on('connect', () => {
@@ -942,4 +949,3 @@ export default function ConnectPage() {
     </div>
   );
 }
-                      

@@ -1,3 +1,4 @@
+// src/app/components/GlobalCallHandler.tsx
 'use client';
 
 import React, { useEffect, useState } from 'react';
@@ -82,14 +83,16 @@ export function GlobalCallHandler() {
     
     // Create socket with error handling
     try {
-      // Use the correct URL from your environment variables or hardcoded server URL
-      // IMPORTANT: This must match your server's URL and protocol (http vs https)
-      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'https://localhost:3000';
+      // Dynamic socket URL based on environment
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 
+        (process.env.NODE_ENV === 'production' 
+          ? 'https://skillconnect-production-84cc.up.railway.app'
+          : 'http://localhost:3000');
       
       if (DEBUG) console.log(`Connecting to socket server at: ${socketUrl}`);
       
-      const socket = io(socketUrl, {
-        rejectUnauthorized: false, // For development only, remove in production
+      // Socket options based on environment
+      const socketOptions: any = {
         auth: {
           userName: session.user.name || 'Anonymous User',
           userId: session.user.id
@@ -98,7 +101,14 @@ export function GlobalCallHandler() {
         reconnectionDelay: 1000,
         timeout: 10000, // 10 second timeout
         transports: ['websocket', 'polling'] // Try websocket first, fallback to polling
-      });
+      };
+
+      // Only add rejectUnauthorized for localhost in development
+      if (socketUrl.includes('localhost') && process.env.NODE_ENV !== 'production') {
+        socketOptions.rejectUnauthorized = false;
+      }
+
+      const socket = io(socketUrl, socketOptions);
 
       socket.on('connect', () => {
         if (DEBUG) console.log('Global socket connected successfully');
