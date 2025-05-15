@@ -9,8 +9,9 @@ import { FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash,
   FaUserFriends, FaHandshake, FaLightbulb, FaExpand, FaCompress } from 'react-icons/fa';
 import ChatComponent from '../components/chat-component';
 import ReportModal from '../components/report-modal';
+import { Suspense } from 'react';
 
-export default function LiveSessionPage() {
+function LiveSessionPageContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1588,5 +1589,12 @@ export default function LiveSessionPage() {
         />
       )}
     </div>
+  );
+}
+export default function LiveSessionPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <LiveSessionPageContent />
+    </Suspense>
   );
 }
