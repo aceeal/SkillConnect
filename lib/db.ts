@@ -8,10 +8,16 @@ const dbConfig = {
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '123456',
   database: process.env.MYSQL_DATABASE || 'skillconnect',
+  port: parseInt(process.env.MYSQL_PORT || '3306'),
+  // Add these for better Railway compatibility
+  connectTimeout: 60000,
+  acquireTimeout: 60000,
+  timeout: 60000,
+  reconnect: true
 };
 
 // Connection pool
-let pool: Pool | null = null;  // Explicitly typed as Pool or null
+let pool: Pool | null = null;
 
 // Initialize pool
 export const getPool = async () => {

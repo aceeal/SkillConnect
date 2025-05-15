@@ -1,4 +1,4 @@
-// /src/app/api/auth/[...nextauth]/route.ts
+// src/app/api/auth/[...nextauth]/route.ts
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
@@ -8,8 +8,9 @@ import bcrypt from "bcrypt";
 // Import the correct database module
 import { executeQuery } from "../../../../../lib/db";
 
-// Define auth options - but don't export it directly as it causes Next.js 15 issues
-const authOptions = {
+// Define auth options as a separate export so it can be imported elsewhere
+export const authOptions = {
+  secret: process.env.NEXTAUTH_SECRET, // Explicitly define the secret
   providers: [
     CredentialsProvider({
       name: "Credentials",
@@ -66,16 +67,20 @@ const authOptions = {
   pages: {
     signIn: "/login",
     signOut: "/auth/signout",
-    error: "/login",
-    newUser: "/signup"
+    error: "/login", // Error code passed in query string as ?error=
+    newUser: "/signup" // New users will be directed here on first sign in
   },
   callbacks: {
     async jwt({ token, user }) {
+      // Add user details to token when user signs in
       if (user) {
         token.id = user.id;
         token.role = user.role;
+        // Include full name
         token.name = user.first_name + ' ' + user.last_name;
+        // Include profile picture
         token.image = user.profile_picture || '/default-profile.png';
+        // Include any other fields you need
         token.firstName = user.first_name;
         token.lastName = user.last_name;
         token.bio = user.bio;
@@ -83,11 +88,13 @@ const authOptions = {
       return token;
     },
     async session({ session, token }) {
+      // Add user ID and role to the session from the token
       if (session.user) {
         session.user.id = token.id;
         session.user.role = token.role;
         session.user.name = token.name;
         session.user.image = token.image;
+        // Add additional fields
         session.user.firstName = token.firstName;
         session.user.lastName = token.lastName;
         session.user.bio = token.bio;
@@ -97,7 +104,7 @@ const authOptions = {
   },
   session: {
     strategy: "jwt" as const,
-    maxAge: 30 * 24 * 60 * 60,
+    maxAge: 30 * 24 * 60 * 60, // 30 days
   },
   debug: process.env.NODE_ENV === "development",
 };
@@ -107,6 +114,3 @@ const handler = NextAuth(authOptions);
 
 // Export the handler for both GET and POST requests
 export { handler as GET, handler as POST };
-
-// For Next.js 15 compatibility, we export authOptions differently
-export { authOptions };
