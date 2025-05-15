@@ -1,120 +1,12 @@
 // server.js
 const express = require('express');
-const https = require('https');
-const fs = require('fs');
+const http = require('http'); // Changed from https to http
 const { Server } = require('socket.io');
 const next = require('next');
-const mysql = require('mysql2/promise');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
-
-// Load SSL/TLS certificates
-const options = {
-  key: fs.readFileSync('cert.key'),
-  cert: fs.readFileSync('cert.crt'),
-};
-
-// Database configuration - make sure it matches your .env file
-const dbConfig = {
-  host: process.env.MYSQL_HOST || 'localhost',
-  user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || '123456',
-  database: process.env.MYSQL_DATABASE || 'skillconnect',
-};
-
-// Function to save session to database
-async function saveSessionToDatabase(session) {
-  try {
-    // Create database connection
-    const connection = await mysql.createConnection(dbConfig);
-    
-    // Insert session data
-    await connection.execute(
-      `INSERT INTO live_sessions (
-        id, user1_id, user2_id, user1_name, user2_name, 
-        started_at, status, topic
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        session.id,
-        session.user1Id,
-        session.user2Id, 
-        session.user1Name,
-        session.user2Name,
-        new Date(session.startedAt),
-        session.status,
-        session.topic
-      ]
-    );
-    
-    console.log(`Session ${session.id} saved to database`);
-    
-    // Close connection
-    await connection.end();
-    
-    return true;
-  } catch (error) {
-    console.error('Error saving session to database:', error);
-    return false;
-  }
-}
-
-// Function to update session in database - returns a promise
-async function updateSessionInDatabase(sessionId, updates) {
-  try {
-    // Create database connection
-    const connection = await mysql.createConnection(dbConfig);
-    
-    // Build the update query
-    const updateFields = [];
-    const values = [];
-    
-    if (updates.status) {
-      updateFields.push('status = ?');
-      values.push(updates.status);
-    }
-    
-    if (updates.endedAt) {
-      updateFields.push('ended_at = ?');
-      values.push(new Date(updates.endedAt));
-      
-      // If we have both start and end times, calculate duration
-      if (updates.startedAt) {
-        const durationMinutes = Math.floor(
-          (new Date(updates.endedAt) - new Date(updates.startedAt)) / (1000 * 60)
-        );
-        updateFields.push('duration_minutes = ?');
-        values.push(durationMinutes);
-      }
-    }
-    
-    if (updateFields.length === 0) {
-      console.log('No fields to update for session', sessionId);
-      await connection.end();
-      return true;
-    }
-    
-    // Add session ID to values
-    values.push(sessionId);
-    
-    // Execute update
-    await connection.execute(
-      `UPDATE live_sessions SET ${updateFields.join(', ')} WHERE id = ?`,
-      values
-    );
-    
-    console.log(`Session ${sessionId} updated in database`);
-    
-    // Close connection
-    await connection.end();
-    
-    return true;
-  } catch (error) {
-    console.error('Error updating session in database:', error);
-    throw error; // Re-throw to allow calling code to catch errors
-  }
-}
 
 // Define these OUTSIDE the connection handler
 const activeQueues = {}; // Store users in queue by category
@@ -168,13 +60,18 @@ function getRecipientSocketId(userId) {
 
 app.prepare().then(() => {
   const server = express();
-  const httpsServer = https.createServer(options, server);
+  // Use HTTP server instead of HTTPS
+  const httpServer = http.createServer(server);
   
-  // Create Socket.IO server with CORS enabled
-  const io = new Server(httpsServer, {
+  // Create Socket.IO server with CORS enabled for Railway
+  const io = new Server(httpServer, {
     cors: {
-      origin: "*",
-      methods: ["GET", "POST"]
+      origin: process.env.NODE_ENV === 'production' 
+        ? ["https://skillconnect-production-84cc.up.railway.app", "https://*.railway.app"]
+        : "*",
+      methods: ["GET", "POST"],
+      allowedHeaders: ["*"],
+      credentials: true
     }
   });
 
@@ -518,58 +415,6 @@ app.prepare().then(() => {
       }
     });
     
-    // NEW: Handle explicit session ending
-    socket.on('end_session', (data) => {
-      const { roomId, status } = data;
-      console.log(`Session end requested: ${roomId} with status: ${status || 'completed'}`);
-      
-      if (activeSessions[roomId]) {
-        // Update session status
-        activeSessions[roomId].status = status || 'completed';
-        activeSessions[roomId].endedAt = new Date();
-        
-        // Update the session in the database
-        updateSessionInDatabase(roomId, {
-          status: status || 'completed',
-          endedAt: activeSessions[roomId].endedAt,
-          startedAt: activeSessions[roomId].startedAt
-        }).catch(err => {
-          console.error(`Failed to update session ${roomId} on end_session:`, err);
-        });
-        
-        // Calculate session duration for stats
-        const duration = (activeSessions[roomId].endedAt - new Date(activeSessions[roomId].startedAt)) / 1000; // in seconds
-        
-        // Update session stats
-        updateSessionStats(duration);
-        
-        // Notify participants if they're still connected
-        const user1Id = activeSessions[roomId].user1Id;
-        const user2Id = activeSessions[roomId].user2Id;
-        
-        if (user1Id && user1Id !== socket.id) {
-          io.to(user1Id).emit('session-ended', { 
-            roomId, 
-            status: status || 'completed' 
-          });
-        }
-        
-        if (user2Id && user2Id !== socket.id) {
-          io.to(user2Id).emit('session-ended', { 
-            roomId, 
-            status: status || 'completed' 
-          });
-        }
-        
-        // Clean up session after a short delay
-        setTimeout(() => {
-          delete activeSessions[roomId];
-        }, 5000);
-        
-        console.log(`Session ${roomId} ended with status: ${status || 'completed'}`);
-      }
-    });
-    
     // Handle user joining queue
     socket.on('join-queue', (userData) => {
       console.log(`User ${userData.name} (${socket.id}) joined queue with interests:`, userData.interests);
@@ -790,9 +635,6 @@ app.prepare().then(() => {
               topic: findCommonInterest(match.user1.interests, match.user2.skills) || 'General Learning'
             };
             
-            // Save session to database
-            saveSessionToDatabase(activeSessions[roomId]);
-            
             // Update session statistics
             sessionStats.totalSessionsToday++;
             sessionStats.sessionsStarted.push(new Date());
@@ -855,15 +697,6 @@ app.prepare().then(() => {
         // Update session status
         activeSessions[sessionId].status = 'terminated';
         activeSessions[sessionId].endedAt = new Date();
-        
-        // Update the session in the database
-        updateSessionInDatabase(sessionId, {
-          status: 'terminated',
-          endedAt: activeSessions[sessionId].endedAt,
-          startedAt: activeSessions[sessionId].startedAt
-        }).catch(err => {
-          console.error(`Failed to update session ${sessionId} on admin-terminate:`, err);
-        });
         
         // Calculate session duration for stats
         const duration = (activeSessions[sessionId].endedAt - activeSessions[sessionId].startedAt) / 1000; // in seconds
@@ -980,24 +813,6 @@ app.prepare().then(() => {
       // Generate a unique room ID for the session
       const roomId = `room_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       
-      // Create session object for tracking
-      const session = {
-        id: roomId,
-        user1Id: callerId,
-        user1Name: onlineUsers[callerId]?.userName || 'User',
-        user2Id: calleeId,
-        user2Name: calleeName || 'User',
-        startedAt: new Date(),
-        status: 'ongoing',
-        topic: 'Direct Call'
-      };
-      
-      // Store in active sessions
-      activeSessions[roomId] = session;
-      
-      // Save to database
-      saveSessionToDatabase(session);
-      
       // Notify both users that session is ready
       // Send to caller
       io.to(callerSocketId).emit('session_ready', {
@@ -1056,7 +871,7 @@ app.prepare().then(() => {
       }
     });
 
-    // Improved disconnect handler for better session cleanup
+    // Handle disconnections
     socket.on('disconnect', () => {
       console.log(`User ${userName} (${socket.id}) disconnected`);
       
@@ -1096,7 +911,7 @@ app.prepare().then(() => {
         }
       });
       
-      // Improved session handling on disconnect
+      // Check if user was in active session and notify peer + update admin dashboard
       Object.entries(activeSessions).forEach(([sessionId, session]) => {
         if (session.user1Id === socket.id || session.user2Id === socket.id) {
           const peerId = session.user1Id === socket.id ? session.user2Id : session.user1Id;
@@ -1105,20 +920,6 @@ app.prepare().then(() => {
           // Update session status
           session.status = 'disconnected';
           session.endedAt = new Date();
-          
-          // Calculate session duration
-          const durationMinutes = Math.floor(
-            (session.endedAt - new Date(session.startedAt)) / (1000 * 60)
-          );
-          
-          // Update the session in the database with improved error handling
-          updateSessionInDatabase(sessionId, {
-            status: 'disconnected',
-            endedAt: session.endedAt,
-            startedAt: session.startedAt
-          }).catch(err => {
-            console.error(`Failed to update session ${sessionId} on disconnect:`, err);
-          });
           
           // Update admin dashboard
           io.emit('admin-session-update', { activeSessions, sessionStats });
@@ -1144,9 +945,10 @@ app.prepare().then(() => {
     return handle(req, res);
   });
 
-  // Start the server
+  // Start the server with Railway's PORT environment variable
   const PORT = process.env.PORT || 3000;
-  httpsServer.listen(PORT, () => {
-    console.log(`Server running on https://localhost:${PORT}`);
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV}`);
   });
 });
