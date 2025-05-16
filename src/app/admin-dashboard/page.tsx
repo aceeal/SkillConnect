@@ -1,9 +1,9 @@
+// src/app/admin-dashboard/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import { motion } from 'framer-motion';
 
 import { 
@@ -41,6 +41,7 @@ export default function AdminDashboard() {
     activeSessions: 0,
     pendingReports: 0,
     totalSessionsToday: 0,
+    sessionsThisWeek: 0,
     totalLearningHours: 0
   });
   
@@ -75,7 +76,6 @@ export default function AdminDashboard() {
 
   const fetchUsers = async () => {
     try {
-      // Call the API to get all users
       const response = await fetch('/api/users?filter=all');
       if (!response.ok) {
         throw new Error('Failed to fetch users');
@@ -85,7 +85,7 @@ export default function AdminDashboard() {
       const formattedUsers = data.users?.map(user => ({
         id: user.id.toString(),
         firstName: user.name?.split(' ')[0] || '',
-        lastName: user.name?.split(' ')[1] || '',
+        lastName: user.name?.split(' ').slice(1).join(' ') || '',
         email: user.email || '',
         profilePicture: user.profilePicture || null,
         role: user.role || 'user',
@@ -99,7 +99,6 @@ export default function AdminDashboard() {
       setUsers(formattedUsers);
       setFilteredUsers(formattedUsers);
       
-      // Update user count in stats
       setStats(prevStats => ({
         ...prevStats,
         totalUsers: formattedUsers.length
@@ -107,7 +106,6 @@ export default function AdminDashboard() {
       
     } catch (error) {
       console.error('Error fetching users:', error);
-      // Fallback to mock data if API fails
       const mockUsers = [
         {
           id: '1',
@@ -134,45 +132,6 @@ export default function AdminDashboard() {
           lastLogin: '2023-11-01T09:45:00Z',
           skills: ['Mathematics (Algebra, Calculus, Trigonometry)', 'Physics Fundamentals'],
           interests: ['Chemistry Basics', 'Biology & Life Sciences']
-        },
-        {
-          id: '3',
-          firstName: 'Mike',
-          lastName: 'Johnson',
-          email: 'mike.johnson@example.com',
-          profilePicture: null,
-          role: 'user',
-          status: 'banned',
-          createdAt: '2023-08-05T16:40:00Z',
-          lastLogin: '2023-10-25T11:30:00Z',
-          skills: ['Public Speaking & Communication', 'Critical Thinking & Problem Solving'],
-          interests: ['Financial Literacy & Budgeting', 'Entrepreneurship Basics']
-        },
-        {
-          id: '4',
-          firstName: 'Sarah',
-          lastName: 'Williams',
-          email: 'sarah.williams@example.com',
-          profilePicture: null,
-          role: 'user',
-          status: 'active',
-          createdAt: '2023-10-30T13:20:00Z',
-          lastLogin: '2023-11-02T17:10:00Z',
-          skills: ['Python Programming', 'Data Science & Analytics'],
-          interests: ['Mobile App Development', 'Cybersecurity Basics']
-        },
-        {
-          id: '5',
-          firstName: 'Admin',
-          lastName: 'User',
-          email: 'admin@skillconnect.com',
-          profilePicture: null,
-          role: 'admin',
-          status: 'active',
-          createdAt: '2023-01-01T00:00:00Z',
-          lastLogin: '2023-11-03T08:00:00Z',
-          skills: [],
-          interests: []
         }
       ];
       
@@ -187,7 +146,6 @@ export default function AdminDashboard() {
 
   const fetchReports = async () => {
     try {
-      // Fetch reports using the real API
       const response = await fetch('/api/reports?status=all');
       if (!response.ok) {
         throw new Error('Failed to fetch reports');
@@ -196,7 +154,6 @@ export default function AdminDashboard() {
       const data = await response.json();
       setReports(data.reports || []);
       
-      // Update pending reports count in stats
       const pendingCount = (data.reports || []).filter(report => report.status === 'pending').length;
       setStats(prevStats => ({
         ...prevStats,
@@ -204,7 +161,6 @@ export default function AdminDashboard() {
       }));
     } catch (error) {
       console.error('Error fetching reports:', error);
-      // Fallback to mock data
       const mockReports = [
         {
           id: '1',
@@ -229,7 +185,6 @@ export default function AdminDashboard() {
 
   const fetchLiveSessions = async () => {
     try {
-      // Fetch active sessions from the API
       const response = await fetch('/api/admin/sessions?status=active');
       if (!response.ok) {
         throw new Error('Failed to fetch live sessions');
@@ -238,14 +193,12 @@ export default function AdminDashboard() {
       const data = await response.json();
       setLiveSessions(data.sessions || []);
       
-      // Update active sessions count in stats
       setStats(prevStats => ({
         ...prevStats,
         activeSessions: (data.sessions || []).length
       }));
     } catch (error) {
       console.error('Error fetching live sessions:', error);
-      // Fallback to mock data
       const mockLiveSessions = [];
       
       setLiveSessions(mockLiveSessions);
@@ -258,7 +211,6 @@ export default function AdminDashboard() {
 
   const fetchFeedback = async () => {
     try {
-      // Use the contact API to fetch feedback submissions
       const response = await fetch('/api/contact');
       if (!response.ok) {
         throw new Error('Failed to fetch feedback');
@@ -266,7 +218,6 @@ export default function AdminDashboard() {
       
       const data = await response.json();
       
-      // Format the submissions to match our feedback structure
       const formattedFeedback = data.submissions?.map(submission => ({
         id: submission.id.toString(),
         userId: submission.user_id?.toString() || 'guest',
@@ -278,7 +229,6 @@ export default function AdminDashboard() {
       setFeedback(formattedFeedback);
     } catch (error) {
       console.error('Error fetching feedback:', error);
-      // Fallback to mock data
       const mockFeedback = [
         {
           id: '1',
@@ -286,20 +236,6 @@ export default function AdminDashboard() {
           userName: 'John Doe',
           message: 'The platform is incredibly easy to use. I found a great tutor for calculus!',
           createdAt: '2023-10-29T15:45:00Z'
-        },
-        {
-          id: '2',
-          userId: '4',
-          userName: 'Sarah Williams',
-          message: 'Good experience overall. Would be nice to have in-session notes capability.',
-          createdAt: '2023-10-27T11:20:00Z'
-        },
-        {
-          id: '3',
-          userId: '2',
-          userName: 'Jane Smith',
-          message: 'Connection occasionally drops during longer sessions. Please improve stability.',
-          createdAt: '2023-10-25T14:10:00Z'
         }
       ];
       
@@ -309,31 +245,18 @@ export default function AdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      // Execute multiple API requests in parallel
-      const [sessionsResponse, learningHoursResponse] = await Promise.all([
-        fetch('/api/stats/sessions').catch(() => ({ ok: false })),
-        fetch('/api/stats/learning-hours').catch(() => ({ ok: false }))
+      const [sessionsResponse] = await Promise.all([
+        fetch('/api/admin/sessions/stats').catch(() => ({ ok: false }))
       ]);
       
-      // Process session stats
-      let sessionsThisWeek = 0;
+      let sessionsData = {};
       if (sessionsResponse.ok) {
-        const sessionsData = await sessionsResponse.json();
-        if (sessionsData.success) {
-          sessionsThisWeek = sessionsData.sessionsThisWeek || 0;
+        const data = await sessionsResponse.json();
+        if (data.success) {
+          sessionsData = data;
         }
       }
       
-      // Process learning hours
-      let totalLearningHours = 0;
-      if (learningHoursResponse.ok) {
-        const hoursData = await learningHoursResponse.json();
-        if (hoursData.success) {
-          totalLearningHours = hoursData.learningHours || 0;
-        }
-      }
-      
-      // Get counts from current data
       const newUsersToday = users.filter(user => {
         const createdDate = new Date(user.createdAt);
         const today = new Date();
@@ -342,17 +265,17 @@ export default function AdminDashboard() {
                createdDate.getFullYear() === today.getFullYear();
       }).length;
       
-      // Update stats
       setStats(prevStats => ({
         ...prevStats,
         newUsersToday,
-        totalSessionsToday: sessionsThisWeek,
-        totalLearningHours
+        activeSessions: sessionsData.activeSessions || 0,
+        totalSessionsToday: sessionsData.sessionsToday || 0,
+        sessionsThisWeek: sessionsData.sessionsThisWeek || 0,
+        totalLearningHours: sessionsData.totalLearningHours || 0
       }));
     } catch (error) {
       console.error('Error fetching stats:', error);
       
-      // Fallback to calculating from local data
       setStats(prevStats => ({
         ...prevStats,
         newUsersToday: users.filter(user => {
@@ -362,8 +285,8 @@ export default function AdminDashboard() {
                 createdDate.getMonth() === today.getMonth() &&
                 createdDate.getFullYear() === today.getFullYear();
         }).length,
-        totalSessionsToday: 0, // Default to 0
-        totalLearningHours: 0.0 // Default to 0.0
+        totalSessionsToday: 0,
+        totalLearningHours: 0.0
       }));
     }
   };
@@ -390,7 +313,6 @@ export default function AdminDashboard() {
     try {
       const newStatus = currentStatus === 'active' ? 'banned' : 'active';
       
-      // This would be an API call to update the user status
       const response = await fetch(`/api/admin/users/${userId}/status`, {
         method: 'PATCH',
         headers: {
@@ -403,7 +325,6 @@ export default function AdminDashboard() {
         throw new Error('Failed to update user status');
       }
       
-      // Update the local state if successful
       setUsers(users.map(user => 
         user.id === userId ? { ...user, status: newStatus } : user
       ));
@@ -416,7 +337,6 @@ export default function AdminDashboard() {
       console.error('Error updating user status:', error);
       alert('Failed to update user status. Please try again.');
       
-      // For the demo, update the UI anyway
       setUsers(users.map(user => 
         user.id === userId ? { ...user, status: currentStatus === 'active' ? 'banned' : 'active' } : user
       ));
@@ -428,15 +348,13 @@ export default function AdminDashboard() {
   };
 
   const handleExportUserData = () => {
-    // This would generate a CSV or similar export format
     try {
-      // Create CSV content
       const headers = ['ID', 'First Name', 'Last Name', 'Email', 'Role', 'Status', 'Created At', 'Last Login'];
       const csvContent = [
         headers.join(','),
         ...users.map(user => [
           user.id,
-          `"${user.firstName}"`, // Quote names to handle commas
+          `"${user.firstName}"`,
           `"${user.lastName}"`,
           user.email,
           user.role,
@@ -446,7 +364,6 @@ export default function AdminDashboard() {
         ].join(','))
       ].join('\n');
       
-      // Create a blob and download link
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -466,7 +383,6 @@ export default function AdminDashboard() {
   const handleTerminateSession = async (sessionId) => {
     if (confirm('Are you sure you want to terminate this session?')) {
       try {
-        // This would be an API call to terminate the session
         const response = await fetch(`/api/admin/sessions/${sessionId}/terminate`, {
           method: 'POST',
         });
@@ -475,14 +391,12 @@ export default function AdminDashboard() {
           throw new Error('Failed to terminate session');
         }
         
-        // Update local state if successful
         setLiveSessions(liveSessions.filter(session => session.id !== sessionId));
         
       } catch (error) {
         console.error('Error terminating session:', error);
         alert('Failed to terminate session. Please try again.');
         
-        // For the demo, update the UI anyway
         setLiveSessions(liveSessions.filter(session => session.id !== sessionId));
       }
     }
@@ -722,7 +636,7 @@ export default function AdminDashboard() {
                         <div className="ml-4">
                           <div className="text-sm font-medium text-gray-500">Active Sessions</div>
                           <div className="text-3xl font-bold text-green-500">{stats.activeSessions}</div>
-                          <div className="text-xs text-blue-600">{stats.totalSessionsToday} total this week</div>
+                          <div className="text-xs text-blue-600">{stats.sessionsThisWeek} this week</div>
                         </div>
                       </div>
                     </div>
@@ -733,9 +647,9 @@ export default function AdminDashboard() {
                           <FiClock className="h-6 w-6" />
                         </div>
                         <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-500">Learning Hours</div>
+                          <div className="text-sm font-medium text-gray-500">Total Learning Hours</div>
                           <div className="text-3xl font-bold text-purple-500">{stats.totalLearningHours.toFixed(1)}</div>
-                          <div className="text-xs text-purple-600">Total platform hours</div>
+                          <div className="text-xs text-purple-600">All users combined</div>
                         </div>
                       </div>
                     </div>
@@ -960,12 +874,13 @@ export default function AdminDashboard() {
                               <div className="flex items-center">
                                 <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
                                   {user.profilePicture ? (
-                                    <Image
+                                    <img
                                       src={user.profilePicture}
                                       alt={`${user.firstName} ${user.lastName}`}
-                                      width={40}
-                                      height={40}
-                                      className="rounded-full"
+                                      className="h-10 w-10 rounded-full object-cover"
+                                      onError={(e) => {
+                                        e.target.src = '/default-profile.png';
+                                      }}
                                     />
                                   ) : (
                                     <span className="text-gray-500 font-semibold">
@@ -1031,7 +946,7 @@ export default function AdminDashboard() {
               </motion.div>
             )}
 
-            {/* Reports Management - Simplified */}
+            {/* Reports Management */}
             {activeTab === 'reports' && (
               <motion.div 
                 initial={{ opacity: 0 }}
@@ -1200,10 +1115,14 @@ export default function AdminDashboard() {
                   
                   <div className="px-6 py-4 border-t border-gray-200">
                     <h3 className="text-sm font-medium text-gray-700 mb-3">Session Statistics</h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div className="bg-gray-50 p-3 rounded-md">
-                        <div className="text-sm text-gray-500">This Week's Sessions</div>
+                        <div className="text-sm text-gray-500">Sessions Today</div>
                         <div className="text-xl font-bold mt-1 text-blue-500">{stats.totalSessionsToday}</div>
+                      </div>
+                      <div className="bg-gray-50 p-3 rounded-md">
+                        <div className="text-sm text-gray-500">Sessions This Week</div>
+                        <div className="text-xl font-bold mt-1 text-green-500">{stats.sessionsThisWeek}</div>
                       </div>
                       <div className="bg-gray-50 p-3 rounded-md">
                         <div className="text-sm text-gray-500">Total Learning Hours</div>

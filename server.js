@@ -63,12 +63,22 @@ app.prepare().then(() => {
   // Use HTTP server instead of HTTPS
   const httpServer = http.createServer(server);
   
-  // Create Socket.IO server with CORS enabled for Railway
+  // Create Socket.IO server with CORS enabled for both development and production
   const io = new Server(httpServer, {
     cors: {
       origin: process.env.NODE_ENV === 'production' 
-        ? ["https://skillconnect-production-84cc.up.railway.app", "https://*.railway.app"]
-        : "*",
+        ? [
+            "https://skillconnect-production-84cc.up.railway.app", 
+            "https://*.railway.app",
+            // Allow your domain with and without www
+            process.env.NEXTAUTH_URL
+          ].filter(Boolean)
+        : [
+            "http://localhost:3000", 
+            "http://localhost:3001",
+            "http://127.0.0.1:3000",
+            "*"
+          ],
       methods: ["GET", "POST"],
       allowedHeaders: ["*"],
       credentials: true
@@ -950,5 +960,6 @@ app.prepare().then(() => {
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV}`);
+    console.log(`Production URL: ${process.env.NEXTAUTH_URL || 'Not set'}`);
   });
 });

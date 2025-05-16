@@ -416,7 +416,14 @@ function LiveSessionPageContent() {
     addLog(`Initial microphone state: ${isMicOn ? 'ON' : 'OFF'}`);
     
     // Get the socket URL from environment variable or default
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+    let socketUrl;
+    if (process.env.NODE_ENV === 'production') {
+      // In production, use the environment variable or the current origin
+      socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+    } else {
+      // In development, always use localhost:3000
+      socketUrl = 'http://localhost:3000';
+    }
     addLog(`Connecting to socket server: ${socketUrl}`);
     
     // 1. Create socket connection

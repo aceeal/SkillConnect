@@ -320,8 +320,15 @@ export default function ConnectPage() {
         setConnecting(true);
         setLoadingQueue(true);
         
-        // Get the socket URL from environment variable or default
-        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+        // Determine socket URL based on environment
+        let socketUrl;
+        if (process.env.NODE_ENV === 'production') {
+          // In production, use the environment variable or the current origin
+          socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || window.location.origin;
+        } else {
+          // In development, always use localhost:3000
+          socketUrl = 'http://localhost:3000';
+        }
         console.log('Connecting to socket server:', socketUrl);
         
         // Connect to Socket.io server
