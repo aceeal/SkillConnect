@@ -270,7 +270,7 @@ export default function ConnectPage() {
     socket.on('session-ready', (data: any) => {
       console.log('Session ready:', data);
       // Navigate to live session with session data
-      router.push(`/live-session?roomId=${data.roomId}&peerId=${data.peer.id}&peerName=${data.peer.name}`);
+      router.push(`/live-session?roomId=${data.roomId}&peerId=${data.peer.id}&peerName=${data.peer.name}&peerDbId=${data.peer.dbId}`);
     });
     
     // Return to queue event

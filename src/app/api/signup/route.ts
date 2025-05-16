@@ -7,12 +7,24 @@ export async function POST(request: Request) {
   try {
     // Parse the request body
     const body = await request.json();
-    const { firstName, lastName, email, password } = body;
+    let { firstName, lastName, email, password } = body;
 
     // Validate required fields
     if (!firstName || !lastName || !email || !password) {
       return NextResponse.json(
         { error: 'All fields are required.' },
+        { status: 400 }
+      );
+    }
+
+    // Capitalize first letter of names
+    firstName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+    lastName = lastName.charAt(0).toUpperCase() + lastName.slice(1).toLowerCase();
+
+    // Validate password length
+    if (password.length < 8) {
+      return NextResponse.json(
+        { error: 'Password must be at least 8 characters long.' },
         { status: 400 }
       );
     }

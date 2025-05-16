@@ -16,12 +16,14 @@ import {
   FiRefreshCw,
   FiUserX,
   FiUserCheck,
+  FiTrash2,
   FiEye,
   FiX,
   FiVideo,
   FiFlag,
   FiDownload,
-  FiClock
+  FiClock,
+  FiCheck
 } from 'react-icons/fi';
 
 export default function AdminDashboard() {
@@ -32,6 +34,8 @@ export default function AdminDashboard() {
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [reports, setReports] = useState([]);
+  const [filteredReports, setFilteredReports] = useState([]);
+  const [reportFilter, setReportFilter] = useState('all');
   const [liveSessions, setLiveSessions] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -106,6 +110,7 @@ export default function AdminDashboard() {
       
     } catch (error) {
       console.error('Error fetching users:', error);
+      // Keep existing mock data as fallback
       const mockUsers = [
         {
           id: '1',
@@ -146,21 +151,44 @@ export default function AdminDashboard() {
 
   const fetchReports = async () => {
     try {
-      const response = await fetch('/api/reports?status=all');
+      // Fetch reports with all statuses and include details
+      const response = await fetch('/api/reports?limit=100&offset=0');
       if (!response.ok) {
         throw new Error('Failed to fetch reports');
       }
       
       const data = await response.json();
-      setReports(data.reports || []);
+      console.log('Raw reports data:', data); // Debug log
       
-      const pendingCount = (data.reports || []).filter(report => report.status === 'pending').length;
+      // Map the reports data to match the expected structure
+      const formattedReports = (data.reports || []).map(report => ({
+        id: report.id.toString(),
+        reportedUserId: report.reported_user_id.toString(),
+        reportedUserName: `${report.reported_user_first_name || 'Unknown'} ${report.reported_user_last_name || 'User'}`,
+        reportedByUserId: report.reported_by_user_id.toString(),
+        reportedByUserName: `${report.reporter_first_name || 'Unknown'} ${report.reporter_last_name || 'User'}`,
+        reason: report.reason || 'No reason provided',
+        details: report.admin_notes || '', // Use admin_notes as details if available
+        status: report.status || 'pending',
+        createdAt: report.created_at
+      }));
+      
+      console.log('Formatted reports:', formattedReports); // Debug log
+      
+      setReports(formattedReports);
+      setFilteredReports(formattedReports);
+      
+      // Update stats with pending reports count
+      const pendingCount = formattedReports.filter(report => report.status === 'pending').length;
       setStats(prevStats => ({
         ...prevStats,
         pendingReports: pendingCount
       }));
+      
     } catch (error) {
       console.error('Error fetching reports:', error);
+      
+      // Use mock data as fallback
       const mockReports = [
         {
           id: '1',
@@ -171,11 +199,12 @@ export default function AdminDashboard() {
           reason: 'Inappropriate behavior during live session',
           details: 'User was using offensive language and being disrespectful',
           status: 'pending',
-          createdAt: '2023-10-28T14:20:00Z'
+          createdAt: new Date().toISOString()
         }
       ];
       
       setReports(mockReports);
+      setFilteredReports(mockReports);
       setStats(prevStats => ({
         ...prevStats,
         pendingReports: mockReports.filter(report => report.status === 'pending').length
@@ -245,15 +274,25 @@ export default function AdminDashboard() {
 
   const fetchStats = async () => {
     try {
-      const [sessionsResponse] = await Promise.all([
-        fetch('/api/admin/sessions/stats').catch(() => ({ ok: false }))
+      const [sessionsResponse, reportsResponse] = await Promise.all([
+        fetch('/api/admin/sessions/stats').catch(() => ({ ok: false })),
+        fetch('/api/admin/reports/count').catch(() => ({ ok: false }))
       ]);
       
       let sessionsData = {};
+      let reportsData = {};
+      
       if (sessionsResponse.ok) {
         const data = await sessionsResponse.json();
         if (data.success) {
           sessionsData = data;
+        }
+      }
+      
+      if (reportsResponse.ok) {
+        const data = await reportsResponse.json();
+        if (data.success) {
+          reportsData = data;
         }
       }
       
@@ -269,9 +308,10 @@ export default function AdminDashboard() {
         ...prevStats,
         newUsersToday,
         activeSessions: sessionsData.activeSessions || 0,
-        totalSessionsToday: sessionsData.sessionsToday || 0,
+        totalSessionsToday: sessionsData.totalSessions || 0,
         sessionsThisWeek: sessionsData.sessionsThisWeek || 0,
-        totalLearningHours: sessionsData.totalLearningHours || 0
+        totalLearningHours: sessionsData.totalLearningHours || 0,
+        pendingReports: reportsData.pending || prevStats.pendingReports
       }));
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -290,6 +330,15 @@ export default function AdminDashboard() {
       }));
     }
   };
+
+  // Filter reports based on status
+  useEffect(() => {
+    if (reportFilter === 'all') {
+      setFilteredReports(reports);
+    } else {
+      setFilteredReports(reports.filter(report => report.status === reportFilter));
+    }
+  }, [reports, reportFilter]);
 
   const handleSearch = (event) => {
     const term = event.target.value;
@@ -347,9 +396,78 @@ export default function AdminDashboard() {
     }
   };
 
+  // Handle report status update
+  const handleUpdateReportStatus = async (reportId, newStatus) => {
+    try {
+      const response = await fetch('/api/reports', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          reportId: reportId,
+          status: newStatus
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to update report status');
+      }
+      
+      // Update reports in state
+      setReports(reports.map(report => 
+        report.id === reportId ? { ...report, status: newStatus } : report
+      ));
+      
+      // Update stats
+      const updatedReports = reports.map(report => 
+        report.id === reportId ? { ...report, status: newStatus } : report
+      );
+      const pendingCount = updatedReports.filter(report => report.status === 'pending').length;
+      setStats(prevStats => ({
+        ...prevStats,
+        pendingReports: pendingCount
+      }));
+      
+    } catch (error) {
+      console.error('Error updating report status:', error);
+      alert('Failed to update report status. Please try again.');
+    }
+  };
+
+  const handleDeleteUser = async (userId, userName) => {
+    if (confirm(`Are you sure you want to delete the account for ${userName}? This action cannot be undone.`)) {
+      try {
+        const response = await fetch(`/api/admin/users/${userId}`, {
+          method: 'DELETE',
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to delete user');
+        }
+        
+        // Remove user from state
+        setUsers(users.filter(user => user.id !== userId));
+        setFilteredUsers(filteredUsers.filter(user => user.id !== userId));
+        
+        // Update stats
+        setStats(prevStats => ({
+          ...prevStats,
+          totalUsers: prevStats.totalUsers - 1
+        }));
+        
+        alert('User account deleted successfully.');
+        
+      } catch (error) {
+        console.error('Error deleting user:', error);
+        alert('Failed to delete user account. Please try again.');
+      }
+    }
+  };
+
   const handleExportUserData = () => {
     try {
-      const headers = ['ID', 'First Name', 'Last Name', 'Email', 'Role', 'Status', 'Created At', 'Last Login'];
+      const headers = ['ID', 'First Name', 'Last Name', 'Email', 'Status', 'Created At', 'Last Login'];
       const csvContent = [
         headers.join(','),
         ...users.map(user => [
@@ -357,7 +475,6 @@ export default function AdminDashboard() {
           `"${user.firstName}"`,
           `"${user.lastName}"`,
           user.email,
-          user.role,
           user.status,
           new Date(user.createdAt).toLocaleString(),
           new Date(user.lastLogin).toLocaleString()
@@ -844,25 +961,22 @@ export default function AdminDashboard() {
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
                             User
                           </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
                             Email
                           </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Role
-                          </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
                             Status
                           </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
                             Joined
                           </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
                             Last Login
                           </th>
-                          <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
                             Actions
                           </th>
                         </tr>
@@ -870,7 +984,7 @@ export default function AdminDashboard() {
                       <tbody className="bg-white divide-y divide-gray-200">
                         {filteredUsers.map((user) => (
                           <tr key={user.id} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap">
+                            <td className="px-6 py-4 whitespace-nowrap w-1/4">
                               <div className="flex items-center">
                                 <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
                                   {user.profilePicture ? (
@@ -895,31 +1009,24 @@ export default function AdminDashboard() {
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
+                            <td className="px-6 py-4 whitespace-nowrap w-1/4">
                               <div className="text-sm text-gray-900">{user.email}</div>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
-                              }`}>
-                                {user.role}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
+                            <td className="px-6 py-4 whitespace-nowrap w-1/6">
                               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                                 user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                               }`}>
                                 {user.status}
                               </span>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-1/6">
                               {formatDate(user.createdAt)}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-1/6">
                               {formatDate(user.lastLogin)}
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <div className="flex justify-end space-x-2">
+                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium w-20">
+                              <div className="flex justify-end space-x-1">
                                 <button
                                   onClick={() => handleToggleUserStatus(user.id, user.status)}
                                   className={`inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white ${
@@ -931,9 +1038,17 @@ export default function AdminDashboard() {
                                 </button>
                                 <button
                                   className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700"
-                                  title="View Details"
+                                  title="View Profile"
+                                  onClick={() => window.open(`/user/${user.id}`, '_blank')}
                                 >
                                   <FiEye className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteUser(user.id, `${user.firstName} ${user.lastName}`)}
+                                  className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-red-600 hover:bg-red-700"
+                                  title="Delete Account"
+                                >
+                                  <FiTrash2 className="h-4 w-4" />
                                 </button>
                               </div>
                             </td>
@@ -956,13 +1071,25 @@ export default function AdminDashboard() {
                 <div className="bg-white rounded-lg shadow-md overflow-hidden">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                     <h2 className="text-lg font-bold text-gray-800">Reports Management</h2>
-                    <button 
-                      onClick={fetchReports}
-                      className="flex items-center px-3 py-1 bg-blue-100 rounded-md text-sm text-blue-700 hover:bg-blue-200"
-                    >
-                      <FiRefreshCw className="h-4 w-4 mr-1" />
-                      Refresh
-                    </button>
+                    <div className="flex space-x-2">
+                      <select
+                        value={reportFilter}
+                        onChange={(e) => setReportFilter(e.target.value)}
+                        className="px-3 py-1 bg-gray-100 rounded-md text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="all">All Reports</option>
+                        <option value="pending">Pending</option>
+                        <option value="reviewed">Reviewed</option>
+                        <option value="resolved">Resolved</option>
+                      </select>
+                      <button 
+                        onClick={fetchReports}
+                        className="flex items-center px-3 py-1 bg-blue-100 rounded-md text-sm text-blue-700 hover:bg-blue-200"
+                      >
+                        <FiRefreshCw className="h-4 w-4 mr-1" />
+                        Refresh
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="overflow-x-auto">
@@ -990,45 +1117,75 @@ export default function AdminDashboard() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {reports.map((report) => (
-                          <tr key={report.id} className={report.status === 'pending' ? 'bg-yellow-50' : 'hover:bg-gray-50'}>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm font-medium text-gray-900">{report.reportedUserName}</div>
-                              <div className="text-xs text-gray-500">ID: {report.reportedUserId}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div className="text-sm text-gray-900">{report.reportedByUserName}</div>
-                              <div className="text-xs text-gray-500">ID: {report.reportedByUserId}</div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="text-sm text-gray-900">{report.reason}</div>
-                              <div className="text-xs text-gray-500 max-w-xs truncate">{report.details}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {formatDate(report.createdAt)}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                report.status === 'pending' 
-                                  ? 'bg-yellow-100 text-yellow-800' 
-                                  : report.status === 'reviewed' 
-                                    ? 'bg-blue-100 text-blue-800' 
-                                    : 'bg-green-100 text-green-800'
-                              }`}>
-                                {report.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <button
-                                onClick={() => handleToggleUserStatus(report.reportedUserId, 'active')}
-                                className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-red-600 hover:bg-red-700"
-                                title="Ban User"
-                              >
-                                <FiUserX className="h-4 w-4" />
-                              </button>
+                        {filteredReports.length === 0 ? (
+                          <tr>
+                            <td colSpan="6" className="px-6 py-8 text-center text-sm text-gray-500">
+                              {reportFilter === 'all' ? 'No reports found.' : `No ${reportFilter} reports found.`}
                             </td>
                           </tr>
-                        ))}
+                        ) : (
+                          filteredReports.map((report) => (
+                            <tr key={report.id} className={report.status === 'pending' ? 'bg-yellow-50' : 'hover:bg-gray-50'}>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm font-medium text-gray-900">{report.reportedUserName}</div>
+                                <div className="text-xs text-gray-500">ID: {report.reportedUserId}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="text-sm text-gray-900">{report.reportedByUserName}</div>
+                                <div className="text-xs text-gray-500">ID: {report.reportedByUserId}</div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-sm text-gray-900">{report.reason}</div>
+                                {report.details && (
+                                  <div className="text-xs text-gray-500 max-w-xs truncate">{report.details}</div>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {formatDate(report.createdAt)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                  report.status === 'pending' 
+                                    ? 'bg-yellow-100 text-yellow-800' 
+                                    : report.status === 'reviewed' 
+                                      ? 'bg-blue-100 text-blue-800' 
+                                      : 'bg-green-100 text-green-800'
+                                }`}>
+                                  {report.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                <div className="flex justify-end space-x-1">
+                                  {report.status === 'pending' && (
+                                    <>
+                                      <button
+                                        onClick={() => handleUpdateReportStatus(report.id, 'reviewed')}
+                                        className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+                                        title="Mark as Reviewed"
+                                      >
+                                        <FiEye className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        onClick={() => handleUpdateReportStatus(report.id, 'resolved')}
+                                        className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-green-600 hover:bg-green-700"
+                                        title="Mark as Resolved"
+                                      >
+                                        <FiCheck className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  )}
+                                  <button
+                                    onClick={() => handleToggleUserStatus(report.reportedUserId, 'active')}
+                                    className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-red-600 hover:bg-red-700"
+                                    title="Ban User"
+                                  >
+                                    <FiUserX className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                   </div>

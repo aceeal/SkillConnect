@@ -1,3 +1,4 @@
+// src/app/signup/page.tsx
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
@@ -114,10 +115,43 @@ export default function SignupPage() {
     setToast(prev => ({ ...prev, isVisible: false }));
   };
 
+  // Function to capitalize first letter
+  const capitalizeFirstLetter = (str) => {
+    if (!str) return '';
+    return str.charAt(0).toUpperCase() + str.slice(1).toLowerCase();
+  };
+
+  // Handle name input changes with automatic capitalization
+  const handleFirstNameChange = (e) => {
+    const value = e.target.value;
+    setFirstName(value);
+  };
+
+  const handleLastNameChange = (e) => {
+    const value = e.target.value;
+    setLastName(value);
+  };
+
+  // Blur handlers to capitalize names when user leaves the field
+  const handleFirstNameBlur = () => {
+    setFirstName(capitalizeFirstLetter(firstName));
+  };
+
+  const handleLastNameBlur = () => {
+    setLastName(capitalizeFirstLetter(lastName));
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError(null);
     setIsLoading(true);
+
+    // Client-side password validation
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      setIsLoading(false);
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError('Passwords do not match.');
@@ -125,13 +159,22 @@ export default function SignupPage() {
       return;
     }
 
+    // Capitalize names before sending
+    const capitalizedFirstName = capitalizeFirstLetter(firstName);
+    const capitalizedLastName = capitalizeFirstLetter(lastName);
+
     try {
       const response = await fetch('/api/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ firstName, lastName, email, password }),
+        body: JSON.stringify({ 
+          firstName: capitalizedFirstName, 
+          lastName: capitalizedLastName, 
+          email, 
+          password 
+        }),
       });
 
       if (!response.ok) {
@@ -199,7 +242,8 @@ export default function SignupPage() {
                 id="firstName"
                 name="firstName"
                 value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
+                onChange={handleFirstNameChange}
+                onBlur={handleFirstNameBlur}
                 className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 transition-all duration-300"
                 required
               />
@@ -214,7 +258,8 @@ export default function SignupPage() {
                 id="lastName"
                 name="lastName"
                 value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
+                onChange={handleLastNameChange}
+                onBlur={handleLastNameBlur}
                 className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 transition-all duration-300"
                 required
               />
@@ -256,7 +301,10 @@ export default function SignupPage() {
               onChange={(e) => setPassword(e.target.value)}
               className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 transition-all duration-300"
               required
+              minLength={8}
+              title="Password must be at least 8 characters long"
             />
+            <p className="text-xs text-gray-500 mt-1">Password must be at least 8 characters long</p>
           </motion.div>
 
           <motion.div
@@ -275,6 +323,7 @@ export default function SignupPage() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 transition-all duration-300"
               required
+              minLength={8}
             />
           </motion.div>
 

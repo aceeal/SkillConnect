@@ -1,10 +1,14 @@
+// src/app/page.tsx
 "use client";
 
 import Link from 'next/link';
 import Image from 'next/image';
 import { useEffect, useRef } from 'react';
+import { useSession } from 'next-auth/react';
 
 export default function Home() {
+  const { data: session, status } = useSession();
+  
   // Refs for animation elements
   const featuresRef = useRef(null);
   const howItWorksRef = useRef(null);
@@ -78,15 +82,15 @@ export default function Home() {
     // Observe elements
     if (featuresRef.current) observer.observe(featuresRef.current);
     if (howItWorksRef.current) observer.observe(howItWorksRef.current);
-    if (signUpRef.current) observer.observe(signUpRef.current); // Observe sign-up section
+    if (signUpRef.current && status === 'unauthenticated') observer.observe(signUpRef.current); // Only observe if not signed in
     
     // Cleanup
     return () => {
       if (featuresRef.current) observer.unobserve(featuresRef.current);
       if (howItWorksRef.current) observer.unobserve(howItWorksRef.current);
-      if (signUpRef.current) observer.unobserve(signUpRef.current); // Cleanup for sign-up ref
+      if (signUpRef.current) observer.unobserve(signUpRef.current);
     };
-  }, []);
+  }, [status]); // Add status as dependency
   
   return (
     <div className="min-h-screen bg-background">
@@ -117,12 +121,22 @@ export default function Home() {
                 Join a community of learners and mentors to share skills, knowledge, and experiences in a collaborative environment.
               </p>
               <div className="flex justify-center lg:justify-start">
-                <Link
-                  href="/connect"
-                  className="inline-block bg-white text-primary px-8 py-4 rounded-lg font-semibold border-2 border-white hover:bg-transparent hover:text-white transition duration-300 animate-bounce-in animation-delay-400"
-                >
-                  Start Connecting
-                </Link>
+                {/* Show different buttons based on authentication status */}
+                {status === 'authenticated' ? (
+                  <Link
+                    href="/connect"
+                    className="inline-block bg-white text-primary px-8 py-4 rounded-lg font-semibold border-2 border-white hover:bg-transparent hover:text-white transition duration-300 animate-bounce-in animation-delay-400"
+                  >
+                    Continue Learning
+                  </Link>
+                ) : (
+                  <Link
+                    href="/connect"
+                    className="inline-block bg-white text-primary px-8 py-4 rounded-lg font-semibold border-2 border-white hover:bg-transparent hover:text-white transition duration-300 animate-bounce-in animation-delay-400"
+                  >
+                    Start Connecting
+                  </Link>
+                )}
               </div>
             </div>
             
@@ -151,6 +165,7 @@ export default function Home() {
           </svg>
         </div>
       </div>
+      
       {/* Features Section with staggered fade-in */}
       <div ref={featuresRef} className="container mx-auto py-16 opacity-0 transition-all duration-1000 transform translate-y-10">
         <h2 className="text-3xl font-bold text-center mb-12 font-poppins text-foreground">
@@ -260,56 +275,133 @@ export default function Home() {
         </div>
       </div>
 
-      {/* IMPROVED Call-to-Action Section with Animation */}
-      <div ref={signUpRef} className="relative py-20 overflow-hidden opacity-0 transition-all duration-1000 transform translate-y-10">
-        {/* Background gradient and shapes */}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary-dark z-0">
-          <div className="absolute top-0 left-0 w-full h-full bg-pattern opacity-10"></div>
-          <div className="absolute -top-20 -right-20 w-96 h-96 bg-white opacity-5 rounded-full animate-float-slow"></div>
-          <div className="absolute -bottom-40 -left-20 w-80 h-80 bg-white opacity-5 rounded-full animate-float"></div>
-        </div>
-        
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="max-w-4xl mx-auto bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-2xl p-10 shadow-2xl border border-white border-opacity-20 sign-up-card opacity-0 transform scale-95">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-              <div className="sign-up-content opacity-0 transform translate-y-10">
-                <h2 className="text-4xl font-bold mb-6 text-white font-poppins leading-tight">
-                  Ready to Get <span className="text-yellow-300">Started</span>?
-                </h2>
-                <p className="text-xl mb-8 text-white text-opacity-90">
-                  Join SkillConnect today and discover a new way to grow your skills.
-                </p>
-                <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
-                  <Link
-                    href="/signup"
-                    className="inline-block bg-white text-primary px-8 py-4 rounded-lg font-semibold text-lg border-2 border-white hover:bg-transparent hover:text-white transition-all duration-300 shadow-lg transform hover:scale-105"
-                  >
-                    Sign Up Now
-                  </Link>
+      {/* IMPROVED Call-to-Action Section with Animation - Only shown if NOT signed in */}
+      {status === 'unauthenticated' && (
+        <div ref={signUpRef} className="relative py-20 overflow-hidden opacity-0 transition-all duration-1000 transform translate-y-10">
+          {/* Background gradient and shapes */}
+          <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary-dark z-0">
+            <div className="absolute top-0 left-0 w-full h-full bg-pattern opacity-10"></div>
+            <div className="absolute -top-20 -right-20 w-96 h-96 bg-white opacity-5 rounded-full animate-float-slow"></div>
+            <div className="absolute -bottom-40 -left-20 w-80 h-80 bg-white opacity-5 rounded-full animate-float"></div>
+          </div>
+          
+          <div className="container mx-auto px-4 relative z-10">
+            <div className="max-w-4xl mx-auto bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-2xl p-10 shadow-2xl border border-white border-opacity-20 sign-up-card opacity-0 transform scale-95">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
+                <div className="sign-up-content opacity-0 transform translate-y-10">
+                  <h2 className="text-4xl font-bold mb-6 text-white font-poppins leading-tight">
+                    Ready to Get <span className="text-yellow-300">Started</span>?
+                  </h2>
+                  <p className="text-xl mb-8 text-white text-opacity-90">
+                    Join SkillConnect today and discover a new way to grow your skills.
+                  </p>
+                  <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                    <Link
+                      href="/signup"
+                      className="inline-block bg-white text-primary px-8 py-4 rounded-lg font-semibold text-lg border-2 border-white hover:bg-transparent hover:text-white transition-all duration-300 shadow-lg transform hover:scale-105"
+                    >
+                      Sign Up Now
+                    </Link>
+                  </div>
                 </div>
-              </div>
-              <div className="hidden md:block sign-up-image opacity-0 transform translate-x-10">
-                <div className="relative">
-                  {/* Decorative elements */}
-                  <div className="absolute -top-4 -right-4 w-20 h-20 bg-yellow-300 bg-opacity-20 rounded-lg animate-float"></div>
-                  <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-primary-light bg-opacity-30 rounded-full animate-float-reverse"></div>
-                  
-                  {/* Illustration container */}
-                  <div className="bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-xl p-6 border border-white border-opacity-20 shadow-lg">
-                    <Image
-                      src="/111.png" 
-                      alt="People connecting"
-                      width={400}
-                      height={300}
-                      className="rounded-lg shadow-lg"
-                    />
+                <div className="hidden md:block sign-up-image opacity-0 transform translate-x-10">
+                  <div className="relative">
+                    {/* Decorative elements */}
+                    <div className="absolute -top-4 -right-4 w-20 h-20 bg-yellow-300 bg-opacity-20 rounded-lg animate-float"></div>
+                    <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-primary-light bg-opacity-30 rounded-full animate-float-reverse"></div>
+                    
+                    {/* Illustration container */}
+                    <div className="bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-xl p-6 border border-white border-opacity-20 shadow-lg">
+                      <Image
+                        src="/111.png" 
+                        alt="People connecting"
+                        width={400}
+                        height={300}
+                        className="rounded-lg shadow-lg"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* Add a personalized section for signed-in users with same colors as signup */}
+      {status === 'authenticated' && (
+        <div className="relative py-20 overflow-hidden">
+          {/* Same background gradient and shapes as signup section */}
+          <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary-dark z-0">
+            <div className="absolute top-0 left-0 w-full h-full bg-pattern opacity-10"></div>
+            <div className="absolute -top-20 -right-20 w-96 h-96 bg-white opacity-5 rounded-full animate-float-slow"></div>
+            <div className="absolute -bottom-40 -left-20 w-80 h-80 bg-white opacity-5 rounded-full animate-float"></div>
+          </div>
+          
+          <div className="container mx-auto px-4 relative z-10">
+            <div className="max-w-4xl mx-auto bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-2xl p-10 shadow-2xl border border-white border-opacity-20">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
+                <div>
+                  <h2 className="text-4xl font-bold mb-6 text-white font-poppins leading-tight">
+                    Welcome back, <span className="text-yellow-300">{session?.user?.name?.split(' ')[0]}</span>!
+                  </h2>
+                  <p className="text-xl mb-8 text-white text-opacity-90">
+                    Ready to continue your learning journey? Set up your profile and connect with others to grow your skills today.
+                  </p>
+                  <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+                    <Link
+                      href="/profile"
+                      className="inline-block bg-white text-primary px-6 py-3 rounded-lg font-semibold text-base border-2 border-white hover:bg-transparent hover:text-white transition-all duration-300 shadow-lg transform hover:scale-105"
+                    >
+                      Profile Setup
+                    </Link>
+                    <Link
+                      href="/dashboard"
+                      className="inline-block bg-transparent text-white px-6 py-3 rounded-lg font-semibold text-base border-2 border-white hover:bg-white hover:text-gray-800 transition-all duration-300 shadow-lg transform hover:scale-105"
+                    >
+                      View Dashboard
+                    </Link>
+                  </div>
+                </div>
+                <div className="hidden md:block">
+                  <div className="relative">
+                    {/* Decorative elements - same as signup */}
+                    <div className="absolute -top-4 -right-4 w-20 h-20 bg-yellow-300 bg-opacity-20 rounded-lg animate-float"></div>
+                    <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-primary-light bg-opacity-30 rounded-full animate-float-reverse"></div>
+                    
+                    {/* Profile image container */}
+                    <div className="bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-xl p-6 border border-white border-opacity-20 shadow-lg">
+                      <div className="flex flex-col items-center">
+                        <div className="w-32 h-32 rounded-full bg-white bg-opacity-20 mb-4 overflow-hidden">
+                          {session?.user?.image ? (
+                            <Image
+                              src={session.user.image}
+                              alt={session.user.name || 'Profile'}
+                              width={128}
+                              height={128}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-white text-4xl font-bold">
+                              {session?.user?.name?.charAt(0).toUpperCase() || 'U'}
+                            </div>
+                          )}
+                        </div>
+                        <h3 className="text-white text-xl font-semibold">
+                          {session?.user?.name}
+                        </h3>
+                        <p className="text-white text-opacity-80 text-sm mt-1">
+                          Ready to connect and learn
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add global styles for animations */}
       <style jsx global>{`

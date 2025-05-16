@@ -20,6 +20,7 @@ function LiveSessionPageContent() {
   const roomId = searchParams.get('roomId') || 'live-session-room';
   const peerId = searchParams.get('peerId') || '';
   const peerName = searchParams.get('peerName') || 'Remote User';
+  const peerDbId = searchParams.get('peerDbId') || ''; // Add this to get the actual database ID
   
   // References for layout calculations
   const pageContainerRef = useRef(null);
@@ -112,7 +113,7 @@ function LiveSessionPageContent() {
   const [userSettings, setUserSettings] = useState(null);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   
-  // User profile states
+  // User profile states - UPDATED to track both socket ID and database ID
   const [localUserProfile, setLocalUserProfile] = useState({
     name: session?.user?.name || 'You',
     interests: [],
@@ -122,7 +123,8 @@ function LiveSessionPageContent() {
   });
   
   const [remoteUserProfile, setRemoteUserProfile] = useState({
-    id: peerId || '',
+    socketId: peerId || '', // Socket ID for WebRTC connection
+    dbId: peerDbId || '', // Database ID for reporting and profile viewing
     name: peerName || 'Remote User',
     interests: [],
     skills: [],
@@ -252,6 +254,39 @@ function LiveSessionPageContent() {
       fetchUserProfileData();
     }
   }, [session, status, searchParams]);
+  
+  // UPDATED: Fetch remote user profile data if we don't have a database ID
+  useEffect(() => {
+    const fetchRemoteUserProfile = async () => {
+      if (!remoteUserProfile.dbId && remoteUserProfile.socketId) {
+        try {
+          addLog('Attempting to fetch remote user profile...');
+          
+          // Try to get user ID from the users API
+          const response = await fetch('/api/users?filter=all');
+          if (response.ok) {
+            const data = await response.json();
+            // Look for a user that might match our peer
+            // This is a fallback - ideally the database ID should come from the URL
+            const matchedUser = data.users.find(user => user.name === remoteUserProfile.name);
+            
+            if (matchedUser) {
+              setRemoteUserProfile(prev => ({
+                ...prev,
+                dbId: String(matchedUser.id),
+                profileImage: matchedUser.profilePicture || ''
+              }));
+              addLog(`Found database ID ${matchedUser.id} for remote user`);
+            }
+          }
+        } catch (error) {
+          addLog(`Error fetching remote user profile: ${error.message}`);
+        }
+      }
+    };
+    
+    fetchRemoteUserProfile();
+  }, [remoteUserProfile.socketId, remoteUserProfile.name]);
   
   // Fetch user settings
   useEffect(() => {
@@ -466,7 +501,9 @@ function LiveSessionPageContent() {
       if (data.userProfile) {
         setRemoteUserProfile(prev => ({
           ...prev,
-          id: data.userId || prev.id,
+          socketId: data.senderId || prev.socketId,
+          // Use the database ID if provided in the user profile
+          dbId: data.userProfile.dbId || data.userId || prev.dbId,
           name: data.userName || 'Remote User',
           interests: data.userProfile.interests || [],
           skills: data.userProfile.skills || [],
@@ -486,7 +523,9 @@ function LiveSessionPageContent() {
       if (data.userProfile) {
         setRemoteUserProfile(prev => ({
           ...prev,
-          id: data.userId || prev.id,
+          socketId: data.senderId || prev.socketId,
+          // Use the database ID if provided in the user profile
+          dbId: data.userProfile.dbId || data.userId || prev.dbId,
           name: data.userName || 'Remote User',
           interests: data.userProfile.interests || [],
           skills: data.userProfile.skills || [],
@@ -731,6 +770,7 @@ function LiveSessionPageContent() {
               userId: session.user.id,
               userName: session.user.name,
               userProfile: {
+                dbId: session.user.id, // Include database ID in user profile
                 interests: localUserProfile.interests,
                 skills: localUserProfile.skills,
                 connectInterests: localUserProfile.connectInterests,
@@ -774,6 +814,7 @@ function LiveSessionPageContent() {
           userId: session.user.id,
           userName: session.user.name,
           userProfile: {
+            dbId: session.user.id, // Include database ID in user profile
             interests: localUserProfile.interests,
             skills: localUserProfile.skills,
             connectInterests: localUserProfile.connectInterests,
@@ -1166,7 +1207,7 @@ function LiveSessionPageContent() {
     addLog(`Sent chat message: ${newMessage}`);
   };
   
-  // Handle report submission
+  // UPDATED: Handle report submission with proper database ID
   const handleSubmitReport = async () => {
     if (!reportReason) {
       alert('Please select a reason for reporting');
@@ -1174,27 +1215,30 @@ function LiveSessionPageContent() {
     }
     
     try {
-      // Make sure we have a numeric ID
-      let reportedId;
+      // Use the database ID for reporting
+      let reportedId = remoteUserProfile.dbId;
       
-      // Try to parse the ID as a number if it's not already one
-      if (typeof remoteUserProfile.id !== 'number') {
-        // First check if it's a numeric string
-        if (/^\d+$/.test(remoteUserProfile.id)) {
-          reportedId = parseInt(remoteUserProfile.id, 10);
+      if (!reportedId) {
+        alert('Cannot report this user: User ID not available. Please try again later or contact support.');
+        setShowReportModal(false);
+        return;
+      }
+      
+      // Ensure the ID is numeric
+      if (typeof reportedId !== 'number') {
+        // Check if it's a numeric string
+        if (/^\d+$/.test(reportedId)) {
+          reportedId = parseInt(reportedId, 10);
         } else {
-          // If it's a socket ID or other non-numeric format, 
-          // we need to handle this differently.
-          // For now, alert the user that we can't process the report
-          alert('Cannot report this user at this time. Please try again later or contact support.');
+          alert('Cannot report this user: Invalid user ID format. Please contact support.');
           setShowReportModal(false);
           return;
         }
-      } else {
-        reportedId = remoteUserProfile.id;
       }
       
-      // Now proceed with the API call using the numeric ID
+      addLog(`Submitting report for user ID: ${reportedId}`);
+      
+      // Submit the report with the numeric database ID
       const response = await fetch('/api/reports', {
         method: 'POST',
         headers: {
@@ -1208,7 +1252,8 @@ function LiveSessionPageContent() {
       });
       
       if (!response.ok) {
-        throw new Error('Failed to submit report');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to submit report');
       }
       
       // Close the modal and reset the reason
@@ -1217,8 +1262,10 @@ function LiveSessionPageContent() {
       
       // Show success message
       alert('Thank you for your report. Our team will review it shortly.');
+      addLog('Report submitted successfully');
     } catch (error) {
       console.error('Error submitting report:', error);
+      addLog(`Error submitting report: ${error.message}`);
       alert('Failed to submit report. Please try again later.');
     }
   };
@@ -1315,10 +1362,12 @@ function LiveSessionPageContent() {
                   </div>
                 </div>
                 <a 
-                  href={`/user/${remoteUserProfile.id}`}
+                  href={remoteUserProfile.dbId ? `/user/${remoteUserProfile.dbId}` : '#'}
                   onClick={(e) => {
                     e.preventDefault();
-                    window.open(`/user/${remoteUserProfile.id}`, '_blank');
+                    if (remoteUserProfile.dbId) {
+                      window.open(`/user/${remoteUserProfile.dbId}`, '_blank');
+                    }
                   }}
                   className="cursor-pointer"
                 >
@@ -1605,6 +1654,7 @@ function LiveSessionPageContent() {
     </div>
   );
 }
+
 export default function LiveSessionPage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
