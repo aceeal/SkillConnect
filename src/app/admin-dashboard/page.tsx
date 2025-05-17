@@ -1456,6 +1456,7 @@ export default function AdminDashboard() {
                         <option value="all">All Sessions</option>
                         <option value="completed">Completed</option>
                         <option value="terminated">Terminated</option>
+                        <option value="disconnected">Disconnected</option>
                       </select>
                     </div>
                   </div>
@@ -1561,7 +1562,9 @@ export default function AdminDashboard() {
                                       ? 'bg-green-100 text-green-800' 
                                       : session.status === 'terminated' 
                                         ? 'bg-red-100 text-red-800' 
-                                        : 'bg-gray-100 text-gray-800'
+                                        : session.status === 'disconnected'
+                                          ? 'bg-yellow-100 text-yellow-800'
+                                          : 'bg-gray-100 text-gray-800'
                                   }`}>
                                     {session.status}
                                   </span>

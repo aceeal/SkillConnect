@@ -19,7 +19,7 @@ export async function GET(request: Request) {
 
     // Get URL params for filtering
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status') || 'all';
+    const statusParam = searchParams.get('status') || 'all';
 
     // Build query based on filters
     let query = `
@@ -33,7 +33,8 @@ export async function GET(request: Request) {
         u2.last_name as user2_last_name,
         ls.started_at,
         ls.ended_at,
-        ls.status
+        ls.status,
+        ls.topic
       FROM live_sessions ls
       JOIN users u1 ON ls.user1_id = u1.id
       JOIN users u2 ON ls.user2_id = u2.id
@@ -41,12 +42,21 @@ export async function GET(request: Request) {
 
     const values: any[] = [];
 
-    if (status && status !== 'all') {
-      query += ` WHERE ls.status = ?`;
-      values.push(status);
+    // Handle status filtering
+    if (statusParam && statusParam !== 'all') {
+      // Check if multiple statuses are requested (comma-separated)
+      if (statusParam.includes(',')) {
+        const statuses = statusParam.split(',').map(s => s.trim());
+        query += ` WHERE ls.status IN (${statuses.map(() => '?').join(',')})`;
+        values.push(...statuses);
+      } else {
+        query += ` WHERE ls.status = ?`;
+        values.push(statusParam);
+      }
     }
 
-    query += ` ORDER BY ls.started_at DESC`;
+    // Add sorting
+    query += ` ORDER BY ls.started_at DESC LIMIT 50`;
 
     // Execute query
     const sessions = await executeQuery({
@@ -65,7 +75,7 @@ export async function GET(request: Request) {
       endedAt: session.ended_at,
       duration: session.ended_at ? calculateDuration(session.started_at, session.ended_at) : 'Ongoing',
       status: session.status,
-      topic: 'Knowledge Sharing' // This would come from another table in a real implementation
+      topic: session.topic || 'Knowledge Sharing'
     }));
 
     return NextResponse.json({ sessions: formattedSessions });
@@ -116,16 +126,27 @@ export async function POST(request: Request) {
         );
       }
 
-      // Update session status to cancelled and set end time
+      // Parse request body to extract session ID if not in URL
+      let targetSessionId = sessionId;
+      try {
+        const body = await request.json();
+        if (body.sessionId) {
+          targetSessionId = body.sessionId;
+        }
+      } catch (e) {
+        console.error('Error parsing request body:', e);
+      }
+
+      // Update session status to terminated and set end time
       const updateQuery = `
         UPDATE live_sessions 
-        SET status = 'cancelled', ended_at = CURRENT_TIMESTAMP
+        SET status = 'terminated', ended_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'ongoing'
       `;
 
       const result = await executeQuery({
         query: updateQuery,
-        values: [sessionId]
+        values: [targetSessionId]
       });
 
       if ((result as any).affectedRows === 0) {

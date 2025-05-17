@@ -1,18 +1,19 @@
 // server.js
 const express = require('express');
-const http = require('http'); // Changed from https to http
+const http = require('http'); 
 const { Server } = require('socket.io');
 const next = require('next');
+const mysql = require('mysql2/promise');
 
 const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
 // Define these OUTSIDE the connection handler
-const activeQueues = {}; // Store users in queue by category
-const userQueues = {}; // Track which queue a user is in
-const sessionMatches = {}; // Track proposed matches
-const activeSessions = {}; // Track active sessions (admin dashboard needs this)
+const activeQueues = {}; 
+const userQueues = {}; 
+const sessionMatches = {}; 
+const activeSessions = {}; 
 const sessionStats = {
   totalSessionsToday: 0,
   sessionsStarted: [],
@@ -22,29 +23,182 @@ const sessionStats = {
 // Track online users
 const onlineUsers = {};
 
+// Database connection configuration
+const dbConfig = {
+  host: process.env.MYSQL_HOST || 'localhost',
+  user: process.env.MYSQL_USER || 'root',
+  password: process.env.MYSQL_PASSWORD || '123456',
+  database: process.env.MYSQL_DATABASE || 'skillconnect',
+  port: parseInt(process.env.MYSQL_PORT || '3306'),
+  connectTimeout: 60000,
+  acquireTimeout: 60000,
+  timeout: 60000
+};
+
+// Create connection pool
+let pool = null;
+
+// Initialize pool
+const getPool = async () => {
+  if (!pool) {
+    pool = mysql.createPool(dbConfig);
+    console.log('Database pool created');
+  }
+  return pool;
+};
+
+// Execute database query
+async function executeQuery(query, values = []) {
+  try {
+    const dbPool = await getPool();
+    const [results] = await dbPool.execute(query, values);
+    return results;
+  } catch (error) {
+    console.error('Database query error:', error);
+    throw error;
+  }
+}
+
+// Save session to database
+async function saveSessionToDatabase(session) {
+  try {
+    // Log the session object for debugging
+    console.log(`SAVING SESSION TO DATABASE:`, JSON.stringify({
+      id: session.id,
+      user1Id: session.user1Id,
+      user2Id: session.user2Id,
+      user1Name: session.user1Name,
+      user2Name: session.user2Name,
+      status: session.status,
+      topic: session.topic
+    }, null, 2));
+    
+    // ⚠️ CRITICAL: Ensure numeric user IDs, not socket IDs ⚠️
+    // If IDs look like socket IDs, dump them for debugging
+    if (session.user1Id && (
+        session.user1Id.includes('.') || 
+        session.user1Id.includes('-') || 
+        session.user1Id.includes('_') ||
+        session.user1Id.includes('/'))) {
+      console.error('⚠️ USER1 ID LOOKS LIKE A SOCKET ID, NOT A DATABASE ID:', session.user1Id);
+    }
+    
+    if (session.user2Id && (
+        session.user2Id.includes('.') || 
+        session.user2Id.includes('-') || 
+        session.user2Id.includes('_') ||
+        session.user2Id.includes('/'))) {
+      console.error('⚠️ USER2 ID LOOKS LIKE A SOCKET ID, NOT A DATABASE ID:', session.user2Id);
+    }
+    
+    // Ensure the user IDs are strings
+    const user1Id = String(session.user1Id || '');
+    const user2Id = String(session.user2Id || '');
+    
+    // Validate user IDs
+    if (!user1Id || !user2Id) {
+      console.error('Cannot save session - missing user IDs:', { user1Id, user2Id });
+      return;
+    }
+    
+    const query = `
+      INSERT INTO live_sessions 
+      (id, user1_id, user2_id, user1_name, user2_name, started_at, status, topic)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    
+    const values = [
+      session.id,
+      user1Id,
+      user2Id,
+      session.user1Name,
+      session.user2Name,
+      new Date(session.startedAt),
+      session.status,
+      session.topic || 'General Learning'
+    ];
+    
+    const result = await executeQuery(query, values);
+    console.log(`Session saved to database: ${session.id}, affected rows:`, result.affectedRows);
+  } catch (error) {
+    console.error('Error saving session to database:', error);
+    console.error('Error details:', error.message);
+    // Print full SQL error if available
+    if (error.sqlMessage) {
+      console.error('SQL error:', error.sqlMessage);
+      console.error('SQL state:', error.sqlState);
+    }
+  }
+}
+
+// Update session in database
+async function updateSessionInDatabase(sessionId, status) {
+  try {
+    const query = `
+      UPDATE live_sessions 
+      SET status = ?, 
+          ended_at = CURRENT_TIMESTAMP,
+          duration_minutes = TIMESTAMPDIFF(MINUTE, started_at, CURRENT_TIMESTAMP)
+      WHERE id = ?
+    `;
+    
+    await executeQuery(query, [status, sessionId]);
+    console.log(`Session updated in database: ${sessionId}, status: ${status}`);
+  } catch (error) {
+    console.error('Error updating session in database:', error);
+  }
+}
+
 // Helper function to update session statistics - define outside connection handler
 function updateSessionStats(duration) {
-  // Update average duration calculation
   const totalSessions = sessionStats.totalSessionsToday;
   const currentAvg = sessionStats.averageDuration;
   
-  // Calculate new average
   sessionStats.averageDuration = ((currentAvg * (totalSessions - 1)) + duration) / totalSessions;
   
-  // Clean up old session data (older than 24 hours)
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   sessionStats.sessionsStarted = sessionStats.sessionsStarted.filter(date => date > oneDayAgo);
   
-  // Recalculate total sessions today based on timestamps
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   sessionStats.totalSessionsToday = sessionStats.sessionsStarted.filter(date => date > startOfToday).length;
 }
 
-// Helper to find common interest between users - define outside connection handler
+// Helper to find common interest between users
 function findCommonInterest(interests, skills) {
-  if (!interests || !skills) return null;
-  return interests.find(interest => skills.includes(interest)) || null;
+  console.log("Finding common interest between:", { interests, skills });
+  if (!interests || !skills || !Array.isArray(interests) || !Array.isArray(skills)) {
+    console.log("Invalid inputs for findCommonInterest, returning default");
+    return "General Learning";
+  }
+  
+  // Look for exact matches first
+  for (const interest of interests) {
+    if (skills.includes(interest)) {
+      console.log(`Found matching interest/skill: ${interest}`);
+      return interest;
+    }
+  }
+  
+  // Look for partial matches (case insensitive)
+  for (const interest of interests) {
+    for (const skill of skills) {
+      if (interest.toLowerCase().includes(skill.toLowerCase()) || 
+          skill.toLowerCase().includes(interest.toLowerCase())) {
+        console.log(`Found partial match: ${interest} and ${skill}`);
+        return interest;
+      }
+    }
+  }
+  
+  // If no match found, use the first interest if available
+  if (interests.length > 0) {
+    console.log(`No match found, using first interest: ${interests[0]}`);
+    return interests[0];
+  }
+  
+  console.log("No interests available, returning default");
+  return "General Learning";
 }
 
 // This new function gets the recipient's socket ID from user ID
@@ -89,19 +243,25 @@ app.prepare().then(() => {
   const roomUsers = {};
 
   // Socket.IO connection handler
+    // Socket.IO connection handler
   io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
     
     // Get user information from auth
     const userName = socket.handshake.auth.userName || 'Anonymous';
-    const userId = socket.handshake.auth.userId || socket.id;
-    console.log(`User ${userName} (${socket.id}) connected`);
+    const userId = socket.handshake.auth.userId || null;
+    console.log(`User ${userName} (${socket.id}) connected with database ID: ${userId}`);
     
-    // Add user to online users map
+    if (!userId || userId === 'undefined' || userId === 'null') {
+      console.warn(`Warning: User ${userName} connected without a valid database ID`);
+    }
+    
+    // Add user to online users map - use numerical database ID if available
     onlineUsers[userId] = {
       socketId: socket.id,
       userName: userName,
-      status: 'online'
+      status: 'online',
+      dbId: userId // Store database ID explicitly
     };
     
     // Log to help with debugging
@@ -124,7 +284,8 @@ app.prepare().then(() => {
       onlineUsers[authUserId] = {
         socketId: socket.id,
         userName: authUserName,
-        status: 'online'
+        status: 'online',
+        dbId: authUserId // Store database ID explicitly
       };
       
       // Log the updated user information
@@ -398,6 +559,29 @@ app.prepare().then(() => {
         calleeId: socket.id,
         calleeName: userName
       });
+      
+      // Generate a unique room ID for the session
+      const roomId = `room_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      
+      // Create session object for direct calls - using database IDs
+      const directCallSession = {
+        id: roomId,
+        user1Id: userId, // Use authenticated user ID, not socket ID
+        user2Id: callerId,
+        user1Name: userName,
+        user2Name: onlineUsers[callerId]?.userName || 'User 1',
+        startedAt: new Date(),
+        status: 'ongoing',
+        topic: 'Direct Call'
+      };
+      
+      console.log(`Creating direct call session with user IDs: ${userId} and ${callerId}`);
+      
+      // Track session in memory
+      activeSessions[roomId] = directCallSession;
+      
+      // Save session to database
+      await saveSessionToDatabase(directCallSession);
     });
     
     socket.on('reject_call', async (data) => {
@@ -428,6 +612,12 @@ app.prepare().then(() => {
     // Handle user joining queue
     socket.on('join-queue', (userData) => {
       console.log(`User ${userData.name} (${socket.id}) joined queue with interests:`, userData.interests);
+      console.log(`User database ID from client: ${userData.id}`);
+      
+      // Validate database ID
+      if (!userData.id || userData.id === 'undefined' || userData.id === 'null') {
+        console.warn(`Warning: User ${userData.name} trying to join queue without valid database ID`);
+      }
       
       // Store user data
       const category = 'general'; // Use a single category for everyone to make matching more likely
@@ -442,12 +632,14 @@ app.prepare().then(() => {
         activeQueues[category][existingUserIndex] = {
           ...activeQueues[category][existingUserIndex],
           interests: userData.interests || [],
-          skills: userData.skills || []
+          skills: userData.skills || [],
+          dbId: userData.id // Save the actual database ID
         };
       } else {
         // Add user to queue with their matching data
         activeQueues[category].push({
-          id: socket.id,
+          id: socket.id,  // Socket ID for socket communication
+          dbId: userData.id, // Database ID for DB operations
           name: userData.name,
           interests: userData.interests || [],
           skills: userData.skills || [],
@@ -539,7 +731,7 @@ app.prepare().then(() => {
       }
     });
 
-    // Handle direct calls between users
+    // Handle direct call between users
     socket.on('direct-call', (data) => {
       const { targetId, callerId } = data;
       console.log(`User ${socket.id} (${userName}) is calling user ${targetId}`);
@@ -559,18 +751,48 @@ app.prepare().then(() => {
         // If caller isn't found in any queue, construct minimal info
         callerInfo = {
           id: socket.id,
+          dbId: session?.user?.id, // Include database ID if available
           name: userName,
         };
       }
       
+      // Find the target user info to get their database ID if available
+      let targetInfo = null;
+      Object.values(activeQueues).forEach(queue => {
+        const target = queue.find(u => u.id === targetId);
+        if (target) {
+          targetInfo = target;
+        }
+      });
+      
+      if (!targetInfo) {
+        targetInfo = {
+          id: targetId,
+          name: 'Remote User'
+        };
+      }
+      
+// This code should be added to your direct-call handler near line ~800
       // Generate a call ID
       const callId = `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      
+      // Ensure we save database IDs, not socket IDs
+      const callerDbId = callerInfo.dbId || userId;
+      const targetDbId = targetInfo.dbId;
+      
+      console.log(`Direct call setup with database IDs: caller=${callerDbId}, target=${targetDbId}`);
       
       // Store a reference to this call
       sessionMatches[callId] = {
         id: callId,
-        user1: callerInfo,
-        user2: { id: targetId },
+        user1: {
+          ...callerInfo,
+          dbId: callerDbId
+        },
+        user2: {
+          ...targetInfo,
+          dbId: targetDbId
+        },
         user1Accepted: true, // Caller has implicitly accepted
         user2Accepted: false,
         createdAt: new Date(),
@@ -597,7 +819,7 @@ app.prepare().then(() => {
     });
 
     // Handle match responses
-    socket.on('match-response', (data) => {
+    socket.on('match-response', async (data) => {
       const { matchId, accepted } = data;
       
       if (sessionMatches[matchId]) {
@@ -633,8 +855,8 @@ app.prepare().then(() => {
             removeFromQueue(match.user1.id);
             removeFromQueue(match.user2.id);
             
-            // Track session for admin dashboard
-            activeSessions[roomId] = {
+            // Create session object to track and save
+            const newSession = {
               id: roomId,
               user1Id: match.user1.id,
               user1Name: match.user1.name,
@@ -644,6 +866,12 @@ app.prepare().then(() => {
               status: 'ongoing',
               topic: findCommonInterest(match.user1.interests, match.user2.skills) || 'General Learning'
             };
+            
+            // Track session for admin dashboard
+            activeSessions[roomId] = newSession;
+            
+            // Save session to database
+            await saveSessionToDatabase(newSession);
             
             // Update session statistics
             sessionStats.totalSessionsToday++;
@@ -697,7 +925,7 @@ app.prepare().then(() => {
       socket.emit('admin-session-data', { activeSessions, sessionStats });
     });
     
-    socket.on('admin-terminate-session', (data) => {
+    socket.on('admin-terminate-session', async (data) => {
       const { sessionId } = data;
       if (activeSessions[sessionId]) {
         // Notify users that session is terminated
@@ -707,6 +935,9 @@ app.prepare().then(() => {
         // Update session status
         activeSessions[sessionId].status = 'terminated';
         activeSessions[sessionId].endedAt = new Date();
+        
+        // Update session in database
+        await updateSessionInDatabase(sessionId, 'terminated');
         
         // Calculate session duration for stats
         const duration = (activeSessions[sessionId].endedAt - activeSessions[sessionId].startedAt) / 1000; // in seconds
@@ -722,6 +953,25 @@ app.prepare().then(() => {
           delete activeSessions[sessionId];
           io.emit('admin-session-update', { activeSessions, sessionStats });
         }, 60000); // Keep terminated session visible for 1 minute
+      }
+    });
+    
+    // Handle end_session event
+    socket.on('end_session', async (data) => {
+      const { roomId, status } = data;
+      
+      if (activeSessions[roomId]) {
+        // Update session status in memory
+        activeSessions[roomId].status = status || 'completed';
+        activeSessions[roomId].endedAt = new Date();
+        
+        // Update session in database
+        await updateSessionInDatabase(roomId, status || 'completed');
+        
+        console.log(`Session ${roomId} ended with status: ${status || 'completed'}`);
+        
+        // Send update to admin dashboard
+        io.emit('admin-session-update', { activeSessions, sessionStats });
       }
     });
     
@@ -768,7 +1018,7 @@ app.prepare().then(() => {
     });
 
     // Add the new direct call handlers for dashboard calling feature
-    socket.on('direct_call', (data) => {
+    socket.on('direct_call', async (data) => {
       const { callId, callerId, callerName, callerPicture, calleeId } = data;
       
       console.log(`Call initiated: ${callId} from ${callerId} to ${calleeId}`);
@@ -795,7 +1045,7 @@ app.prepare().then(() => {
     });
 
     // Handle call acceptance - this is different from the existing accept_call event
-    socket.on('accept_call', (data) => {
+    socket.on('accept_call', async (data) => {
       const { callId, callerId, calleeId, calleeName, calleePicture } = data;
       
       console.log(`Call accepted: ${callId}`);
@@ -823,14 +1073,35 @@ app.prepare().then(() => {
       // Generate a unique room ID for the session
       const roomId = `room_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       
+      // Create session object for direct calls
+      const directCallSession = {
+        id: roomId,
+        user1Id: callerId,
+        user2Id: calleeId || socket.id,
+        user1Name: onlineUsers[callerId]?.userName || 'User 1',
+        user2Name: calleeName || userName,
+        startedAt: new Date(),
+        status: 'ongoing',
+        topic: 'Direct Call'
+      };
+      
+      // Track session in memory
+      activeSessions[roomId] = directCallSession;
+      
+      // Save session to database
+      await saveSessionToDatabase(directCallSession);
+      
+      // Notify admin dashboard
+      io.emit('admin-session-update', { activeSessions, sessionStats });
+      
       // Notify both users that session is ready
       // Send to caller
       io.to(callerSocketId).emit('session_ready', {
         roomId,
         peer: {
-          id: calleeId,
-          name: calleeName,
-          picture: calleePicture
+          id: calleeId || socket.id,
+          name: calleeName || userName,
+          picture: calleePicture || '/default-profile.png'
         }
       });
       
@@ -882,7 +1153,7 @@ app.prepare().then(() => {
     });
 
     // Handle disconnections
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       console.log(`User ${userName} (${socket.id}) disconnected`);
       
       // Update user's online status
@@ -922,7 +1193,7 @@ app.prepare().then(() => {
       });
       
       // Check if user was in active session and notify peer + update admin dashboard
-      Object.entries(activeSessions).forEach(([sessionId, session]) => {
+      Object.entries(activeSessions).forEach(async ([sessionId, session]) => {
         if (session.user1Id === socket.id || session.user2Id === socket.id) {
           const peerId = session.user1Id === socket.id ? session.user2Id : session.user1Id;
           io.to(peerId).emit('session-disconnected');
@@ -930,6 +1201,9 @@ app.prepare().then(() => {
           // Update session status
           session.status = 'disconnected';
           session.endedAt = new Date();
+          
+          // Update session in database
+          await updateSessionInDatabase(sessionId, 'disconnected');
           
           // Update admin dashboard
           io.emit('admin-session-update', { activeSessions, sessionStats });
