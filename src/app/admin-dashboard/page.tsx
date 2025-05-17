@@ -23,7 +23,8 @@ import {
   FiFlag,
   FiDownload,
   FiClock,
-  FiCheck
+  FiCheck,
+  FiAlertCircle
 } from 'react-icons/fi';
 
 export default function AdminDashboard() {
@@ -39,6 +40,7 @@ export default function AdminDashboard() {
   const [liveSessions, setLiveSessions] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [errors, setErrors] = useState({});
   const [stats, setStats] = useState({
     totalUsers: 0,
     newUsersToday: 0,
@@ -63,6 +65,7 @@ export default function AdminDashboard() {
 
   const fetchData = async () => {
     setIsLoading(true);
+    setErrors({});
     try {
       await Promise.all([
         fetchUsers(),
@@ -73,6 +76,7 @@ export default function AdminDashboard() {
       ]);
     } catch (error) {
       console.error('Error fetching admin data:', error);
+      setErrors(prev => ({...prev, general: 'Error fetching admin data'}));
     } finally {
       setIsLoading(false);
     }
@@ -82,11 +86,16 @@ export default function AdminDashboard() {
     try {
       const response = await fetch('/api/users?filter=all');
       if (!response.ok) {
-        throw new Error('Failed to fetch users');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch users: ${response.status}`);
       }
       
       const data = await response.json();
-      const formattedUsers = data.users?.map(user => ({
+      if (!data.users || !Array.isArray(data.users)) {
+        throw new Error('Invalid response format: users array not found');
+      }
+      
+      const formattedUsers = data.users.map(user => ({
         id: user.id.toString(),
         firstName: user.name?.split(' ')[0] || '',
         lastName: user.name?.split(' ').slice(1).join(' ') || '',
@@ -98,7 +107,7 @@ export default function AdminDashboard() {
         lastLogin: user.lastActive || new Date().toISOString(),
         skills: user.skills || [],
         interests: user.interests || []
-      })) || [];
+      }));
       
       setUsers(formattedUsers);
       setFilteredUsers(formattedUsers);
@@ -110,65 +119,40 @@ export default function AdminDashboard() {
       
     } catch (error) {
       console.error('Error fetching users:', error);
-      // Keep existing mock data as fallback
-      const mockUsers = [
-        {
-          id: '1',
-          firstName: 'John',
-          lastName: 'Doe',
-          email: 'john.doe@example.com',
-          profilePicture: null,
-          role: 'user',
-          status: 'active',
-          createdAt: '2023-10-15T10:30:00Z',
-          lastLogin: '2023-11-02T14:22:00Z',
-          skills: ['JavaScript & Web Development', 'React', 'Node.js'],
-          interests: ['Python Programming', 'Data Science & Analytics']
-        },
-        {
-          id: '2',
-          firstName: 'Jane',
-          lastName: 'Smith',
-          email: 'jane.smith@example.com',
-          profilePicture: null,
-          role: 'user',
-          status: 'active',
-          createdAt: '2023-09-20T08:15:00Z',
-          lastLogin: '2023-11-01T09:45:00Z',
-          skills: ['Mathematics (Algebra, Calculus, Trigonometry)', 'Physics Fundamentals'],
-          interests: ['Chemistry Basics', 'Biology & Life Sciences']
-        }
-      ];
-      
-      setUsers(mockUsers);
-      setFilteredUsers(mockUsers);
-      setStats(prevStats => ({
-        ...prevStats,
-        totalUsers: mockUsers.length
-      }));
+      setErrors(prev => ({...prev, users: error.message}));
+      // Don't set any placeholder data to force fixing the real issue
+      setUsers([]);
+      setFilteredUsers([]);
     }
   };
 
   const fetchReports = async () => {
     try {
-      // Fetch reports with all statuses and include details
-      const response = await fetch('/api/reports?limit=100&offset=0');
+      // Fetch reports with all statuses
+      const response = await fetch('/api/reports');
       if (!response.ok) {
-        throw new Error('Failed to fetch reports');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch reports: ${response.status}`);
       }
       
       const data = await response.json();
       console.log('Raw reports data:', data); // Debug log
       
+      if (!data.reports || !Array.isArray(data.reports)) {
+        throw new Error('Invalid response format: reports array not found');
+      }
+      
       // Map the reports data to match the expected structure
-      const formattedReports = (data.reports || []).map(report => ({
+      // Adjust field names to match your actual API response structure
+      const formattedReports = data.reports.map(report => ({
         id: report.id.toString(),
         reportedUserId: report.reported_user_id.toString(),
-        reportedUserName: `${report.reported_user_first_name || 'Unknown'} ${report.reported_user_last_name || 'User'}`,
+        reportedUserName: `${report.reported_user_first_name || ''} ${report.reported_user_last_name || ''}`.trim() || 'Unknown User',
         reportedByUserId: report.reported_by_user_id.toString(),
-        reportedByUserName: `${report.reporter_first_name || 'Unknown'} ${report.reporter_last_name || 'User'}`,
+        reportedByUserName: `${report.reporter_first_name || ''} ${report.reporter_last_name || ''}`.trim() || 'Unknown User',
         reason: report.reason || 'No reason provided',
-        details: report.admin_notes || '', // Use admin_notes as details if available
+        // No admin_notes field in your database schema
+        details: '', 
         status: report.status || 'pending',
         createdAt: report.created_at
       }));
@@ -187,54 +171,39 @@ export default function AdminDashboard() {
       
     } catch (error) {
       console.error('Error fetching reports:', error);
-      
-      // Use mock data as fallback
-      const mockReports = [
-        {
-          id: '1',
-          reportedUserId: '3',
-          reportedUserName: 'Mike Johnson',
-          reportedByUserId: '2',
-          reportedByUserName: 'Jane Smith',
-          reason: 'Inappropriate behavior during live session',
-          details: 'User was using offensive language and being disrespectful',
-          status: 'pending',
-          createdAt: new Date().toISOString()
-        }
-      ];
-      
-      setReports(mockReports);
-      setFilteredReports(mockReports);
-      setStats(prevStats => ({
-        ...prevStats,
-        pendingReports: mockReports.filter(report => report.status === 'pending').length
-      }));
+      setErrors(prev => ({...prev, reports: error.message}));
+      // Don't set any placeholder data
+      setReports([]);
+      setFilteredReports([]);
     }
   };
 
   const fetchLiveSessions = async () => {
     try {
-      const response = await fetch('/api/admin/sessions?status=active');
+      const response = await fetch('/api/admin/sessions');
       if (!response.ok) {
-        throw new Error('Failed to fetch live sessions');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch live sessions: ${response.status}`);
       }
       
       const data = await response.json();
-      setLiveSessions(data.sessions || []);
+      console.log('Live sessions data:', data); // Debug log
+      
+      if (!data.sessions || !Array.isArray(data.sessions)) {
+        throw new Error('Invalid response format: sessions array not found');
+      }
+      
+      setLiveSessions(data.sessions);
       
       setStats(prevStats => ({
         ...prevStats,
-        activeSessions: (data.sessions || []).length
+        activeSessions: data.sessions.filter(session => session.status === 'ongoing').length
       }));
     } catch (error) {
       console.error('Error fetching live sessions:', error);
-      const mockLiveSessions = [];
-      
-      setLiveSessions(mockLiveSessions);
-      setStats(prevStats => ({
-        ...prevStats,
-        activeSessions: mockLiveSessions.length
-      }));
+      setErrors(prev => ({...prev, sessions: error.message}));
+      // Don't set any placeholder data
+      setLiveSessions([]);
     }
   };
 
@@ -242,33 +211,31 @@ export default function AdminDashboard() {
     try {
       const response = await fetch('/api/contact');
       if (!response.ok) {
-        throw new Error('Failed to fetch feedback');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch feedback: ${response.status}`);
       }
       
       const data = await response.json();
+      console.log('Feedback data:', data); // Debug log
       
-      const formattedFeedback = data.submissions?.map(submission => ({
+      if (!data.submissions || !Array.isArray(data.submissions)) {
+        throw new Error('Invalid response format: submissions array not found');
+      }
+      
+      const formattedFeedback = data.submissions.map(submission => ({
         id: submission.id.toString(),
         userId: submission.user_id?.toString() || 'guest',
         userName: submission.name || 'Anonymous',
         message: submission.message,
         createdAt: submission.created_at || new Date().toISOString()
-      })) || [];
+      }));
       
       setFeedback(formattedFeedback);
     } catch (error) {
       console.error('Error fetching feedback:', error);
-      const mockFeedback = [
-        {
-          id: '1',
-          userId: '1',
-          userName: 'John Doe',
-          message: 'The platform is incredibly easy to use. I found a great tutor for calculus!',
-          createdAt: '2023-10-29T15:45:00Z'
-        }
-      ];
-      
-      setFeedback(mockFeedback);
+      setErrors(prev => ({...prev, feedback: error.message}));
+      // Don't set any placeholder data
+      setFeedback([]);
     }
   };
 
@@ -284,18 +251,25 @@ export default function AdminDashboard() {
       
       if (sessionsResponse.ok) {
         const data = await sessionsResponse.json();
+        console.log('Sessions stats data:', data); // Debug log
         if (data.success) {
           sessionsData = data;
         }
+      } else {
+        console.error('Failed to fetch sessions stats:', await sessionsResponse.text().catch(() => 'Unknown error'));
       }
       
       if (reportsResponse.ok) {
         const data = await reportsResponse.json();
+        console.log('Reports count data:', data); // Debug log
         if (data.success) {
           reportsData = data;
         }
+      } else {
+        console.error('Failed to fetch reports count:', await reportsResponse.text().catch(() => 'Unknown error'));
       }
       
+      // Calculate new users today from actual data
       const newUsersToday = users.filter(user => {
         const createdDate = new Date(user.createdAt);
         const today = new Date();
@@ -315,19 +289,7 @@ export default function AdminDashboard() {
       }));
     } catch (error) {
       console.error('Error fetching stats:', error);
-      
-      setStats(prevStats => ({
-        ...prevStats,
-        newUsersToday: users.filter(user => {
-          const createdDate = new Date(user.createdAt);
-          const today = new Date();
-          return createdDate.getDate() === today.getDate() &&
-                createdDate.getMonth() === today.getMonth() &&
-                createdDate.getFullYear() === today.getFullYear();
-        }).length,
-        totalSessionsToday: 0,
-        totalLearningHours: 0.0
-      }));
+      setErrors(prev => ({...prev, stats: error.message}));
     }
   };
 
@@ -371,7 +333,8 @@ export default function AdminDashboard() {
       });
       
       if (!response.ok) {
-        throw new Error('Failed to update user status');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to update user status: ${response.status}`);
       }
       
       setUsers(users.map(user => 
@@ -384,15 +347,7 @@ export default function AdminDashboard() {
       
     } catch (error) {
       console.error('Error updating user status:', error);
-      alert('Failed to update user status. Please try again.');
-      
-      setUsers(users.map(user => 
-        user.id === userId ? { ...user, status: currentStatus === 'active' ? 'banned' : 'active' } : user
-      ));
-      
-      setFilteredUsers(filteredUsers.map(user => 
-        user.id === userId ? { ...user, status: currentStatus === 'active' ? 'banned' : 'active' } : user
-      ));
+      alert('Failed to update user status: ' + error.message);
     }
   };
 
@@ -411,7 +366,8 @@ export default function AdminDashboard() {
       });
       
       if (!response.ok) {
-        throw new Error('Failed to update report status');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to update report status: ${response.status}`);
       }
       
       // Update reports in state
@@ -431,7 +387,7 @@ export default function AdminDashboard() {
       
     } catch (error) {
       console.error('Error updating report status:', error);
-      alert('Failed to update report status. Please try again.');
+      alert('Failed to update report status: ' + error.message);
     }
   };
 
@@ -443,7 +399,8 @@ export default function AdminDashboard() {
         });
         
         if (!response.ok) {
-          throw new Error('Failed to delete user');
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Failed to delete user: ${response.status}`);
         }
         
         // Remove user from state
@@ -460,7 +417,7 @@ export default function AdminDashboard() {
         
       } catch (error) {
         console.error('Error deleting user:', error);
-        alert('Failed to delete user account. Please try again.');
+        alert('Failed to delete user account: ' + error.message);
       }
     }
   };
@@ -493,28 +450,31 @@ export default function AdminDashboard() {
       console.log('Exporting user data...');
     } catch (error) {
       console.error('Error exporting user data:', error);
-      alert('Failed to export user data. Please try again.');
+      alert('Failed to export user data: ' + error.message);
     }
   };
 
   const handleTerminateSession = async (sessionId) => {
     if (confirm('Are you sure you want to terminate this session?')) {
       try {
-        const response = await fetch(`/api/admin/sessions/${sessionId}/terminate`, {
+        const response = await fetch(`/api/admin/sessions/terminate`, {
           method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ sessionId })
         });
         
         if (!response.ok) {
-          throw new Error('Failed to terminate session');
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Failed to terminate session: ${response.status}`);
         }
         
         setLiveSessions(liveSessions.filter(session => session.id !== sessionId));
         
       } catch (error) {
         console.error('Error terminating session:', error);
-        alert('Failed to terminate session. Please try again.');
-        
-        setLiveSessions(liveSessions.filter(session => session.id !== sessionId));
+        alert('Failed to terminate session: ' + error.message);
       }
     }
   };
@@ -564,6 +524,31 @@ export default function AdminDashboard() {
     );
   }
 
+  // Display API errors if any
+  const ErrorDisplay = ({ errors }) => {
+    if (Object.keys(errors).length === 0) return null;
+    
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
+        <div className="flex items-center mb-2">
+          <FiAlertCircle className="h-5 w-5 text-red-500 mr-2" />
+          <h3 className="text-lg font-medium text-red-800">API Errors Detected</h3>
+        </div>
+        <div className="space-y-2">
+          {Object.entries(errors).map(([key, error]) => (
+            <div key={key} className="flex items-start">
+              <span className="text-red-700 font-semibold mr-2">{key}:</span>
+              <span className="text-red-600">{error}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-3 text-sm text-red-700">
+          Fix these errors to see real data instead of empty states.
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
       style={{
@@ -572,6 +557,8 @@ export default function AdminDashboard() {
       }}
     >
       <div className="container mx-auto p-4">
+        {Object.keys(errors).length > 0 && <ErrorDisplay errors={errors} />}
+        
         <div className="flex flex-row gap-4">
           {/* Left column - Sidebar */}
           <div className="w-80">
@@ -909,6 +896,18 @@ export default function AdminDashboard() {
                         </div>
                       </div>
                     )}
+                    
+                    {/* Empty state if no activities */}
+                    {users.length === 0 && reports.filter(r => r.status === 'pending').length === 0 && 
+                     liveSessions.length === 0 && feedback.length === 0 && users.filter(u => u.status === 'banned').length === 0 && (
+                      <div className="flex items-center justify-center py-6">
+                        <div className="text-center">
+                          <FiActivity className="mx-auto h-10 w-10 text-gray-400" />
+                          <p className="mt-2 text-sm font-medium text-gray-900">No recent activity</p>
+                          <p className="mt-1 text-xs text-gray-500">Check back later or fix API errors to see activity</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -958,104 +957,112 @@ export default function AdminDashboard() {
                   </div>
                   
                   <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
-                            User
-                          </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
-                            Email
-                          </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
-                            Status
-                          </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
-                            Joined
-                          </th>
-                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
-                            Last Login
-                          </th>
-                          <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredUsers.map((user) => (
-                          <tr key={user.id} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap w-1/4">
-                              <div className="flex items-center">
-                                <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                                  {user.profilePicture ? (
-                                    <img
-                                      src={user.profilePicture}
-                                      alt={`${user.firstName} ${user.lastName}`}
-                                      className="h-10 w-10 rounded-full object-cover"
-                                      onError={(e) => {
-                                        e.target.src = '/default-profile.png';
-                                      }}
-                                    />
-                                  ) : (
-                                    <span className="text-gray-500 font-semibold">
-                                      {user.firstName[0]}{user.lastName[0]}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="ml-4">
-                                  <div className="text-sm font-medium text-gray-900">
-                                    {user.firstName} {user.lastName}
+                    {users.length === 0 ? (
+                      <div className="text-center py-8">
+                        <FiUsers className="mx-auto h-12 w-12 text-gray-400" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">No users found</h3>
+                        <p className="mt-1 text-sm text-gray-500">Fix API connection to see users</p>
+                      </div>
+                    ) : (
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
+                              User
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
+                              Email
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
+                              Status
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
+                              Joined
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
+                              Last Login
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-20">
+                              Actions
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {filteredUsers.map((user) => (
+                            <tr key={user.id} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap w-1/4">
+                                <div className="flex items-center">
+                                  <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                                    {user.profilePicture ? (
+                                      <img
+                                        src={user.profilePicture}
+                                        alt={`${user.firstName} ${user.lastName}`}
+                                        className="h-10 w-10 rounded-full object-cover"
+                                        onError={(e) => {
+                                          e.target.src = '/default-profile.png';
+                                        }}
+                                      />
+                                    ) : (
+                                      <span className="text-gray-500 font-semibold">
+                                        {user.firstName[0]}{user.lastName[0]}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="ml-4">
+                                    <div className="text-sm font-medium text-gray-900">
+                                      {user.firstName} {user.lastName}
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap w-1/4">
-                              <div className="text-sm text-gray-900">{user.email}</div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap w-1/6">
-                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                              }`}>
-                                {user.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-1/6">
-                              {formatDate(user.createdAt)}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-1/6">
-                              {formatDate(user.lastLogin)}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium w-20">
-                              <div className="flex justify-end space-x-1">
-                                <button
-                                  onClick={() => handleToggleUserStatus(user.id, user.status)}
-                                  className={`inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white ${
-                                    user.status === 'active' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
-                                  }`}
-                                  title={user.status === 'active' ? 'Ban User' : 'Unban User'}
-                                >
-                                  {user.status === 'active' ? <FiUserX className="h-4 w-4" /> : <FiUserCheck className="h-4 w-4" />}
-                                </button>
-                                <button
-                                  className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700"
-                                  title="View Profile"
-                                  onClick={() => window.open(`/user/${user.id}`, '_blank')}
-                                >
-                                  <FiEye className="h-4 w-4" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteUser(user.id, `${user.firstName} ${user.lastName}`)}
-                                  className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-red-600 hover:bg-red-700"
-                                  title="Delete Account"
-                                >
-                                  <FiTrash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap w-1/4">
+                                <div className="text-sm text-gray-900">{user.email}</div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap w-1/6">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                  user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {user.status}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-1/6">
+                                {formatDate(user.createdAt)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-1/6">
+                                {formatDate(user.lastLogin)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium w-20">
+                                <div className="flex justify-end space-x-1">
+                                  <button
+                                    onClick={() => handleToggleUserStatus(user.id, user.status)}
+                                    className={`inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white ${
+                                      user.status === 'active' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                                    }`}
+                                    title={user.status === 'active' ? 'Ban User' : 'Unban User'}
+                                  >
+                                    {user.status === 'active' ? <FiUserX className="h-4 w-4" /> : <FiUserCheck className="h-4 w-4" />}
+                                  </button>
+                                  <button
+                                    className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700"
+                                    title="View Profile"
+                                    onClick={() => window.open(`/user/${user.id}`, '_blank')}
+                                  >
+                                    <FiEye className="h-4 w-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteUser(user.id, `${user.firstName} ${user.lastName}`)}
+                                    className="inline-flex items-center p-1 border border-transparent rounded-full shadow-sm text-white bg-red-600 hover:bg-red-700"
+                                    title="Delete Account"
+                                  >
+                                    <FiTrash2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -1120,7 +1127,9 @@ export default function AdminDashboard() {
                         {filteredReports.length === 0 ? (
                           <tr>
                             <td colSpan="6" className="px-6 py-8 text-center text-sm text-gray-500">
-                              {reportFilter === 'all' ? 'No reports found.' : `No ${reportFilter} reports found.`}
+                              {errors.reports ? 
+                                'Error fetching reports. Please check API connection.' : 
+                                reportFilter === 'all' ? 'No reports found.' : `No ${reportFilter} reports found.`}
                             </td>
                           </tr>
                         ) : (
@@ -1219,7 +1228,9 @@ export default function AdminDashboard() {
                       <div className="text-center py-6">
                         <FiVideo className="mx-auto h-12 w-12 text-gray-400" />
                         <h3 className="mt-2 text-sm font-medium text-gray-900">No active sessions</h3>
-                        <p className="mt-1 text-sm text-gray-500">There are no live sessions currently in progress.</p>
+                        <p className="mt-1 text-sm text-gray-500">
+                          {errors.sessions ? 'Error fetching sessions. Please check API connection.' : 'There are no live sessions currently in progress.'}
+                        </p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1231,27 +1242,27 @@ export default function AdminDashboard() {
                                 <p className="text-xs text-gray-500">Started: {formatDate(session.startedAt)}</p>
                               </div>
                               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                {session.status}
+                                {session.status || 'active'}
                               </span>
                             </div>
                             
                             <div className="mb-3">
-                              <p className="text-sm text-gray-700">Topic: <span className="font-medium">{session.topic}</span></p>
+                              <p className="text-sm text-gray-700">Topic: <span className="font-medium">{session.topic || 'General'}</span></p>
                               <p className="text-sm text-gray-700">Duration: <span className="font-medium">{calculateDuration(session.startedAt)}</span></p>
                             </div>
                             
                             <div className="flex justify-between mb-4">
                               <div className="flex items-center">
                                 <div className="h-8 w-8 rounded-full bg-blue-300 flex items-center justify-center">
-                                  <span className="text-xs font-medium">{session.user1Name.charAt(0)}</span>
+                                  <span className="text-xs font-medium">{(session.user1Name || 'User 1').charAt(0)}</span>
                                 </div>
-                                <span className="ml-2 text-sm">{session.user1Name}</span>
+                                <span className="ml-2 text-sm">{session.user1Name || 'User 1'}</span>
                               </div>
                               <div className="flex items-center">
                                 <div className="h-8 w-8 rounded-full bg-purple-300 flex items-center justify-center">
-                                  <span className="text-xs font-medium">{session.user2Name.charAt(0)}</span>
+                                  <span className="text-xs font-medium">{(session.user2Name || 'User 2').charAt(0)}</span>
                                 </div>
-                                <span className="ml-2 text-sm">{session.user2Name}</span>
+                                <span className="ml-2 text-sm">{session.user2Name || 'User 2'}</span>
                               </div>
                             </div>
                             
@@ -1314,7 +1325,7 @@ export default function AdminDashboard() {
                     <ul className="divide-y divide-gray-200">
                       {feedback.length === 0 ? (
                         <li className="p-6 text-center text-gray-500">
-                          No feedback submissions yet.
+                          {errors.feedback ? 'Error fetching feedback. Please check API connection.' : 'No feedback submissions yet.'}
                         </li>
                       ) : (
                         feedback.map((item) => (

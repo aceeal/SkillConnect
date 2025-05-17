@@ -8,6 +8,7 @@ import { useSession } from 'next-auth/react';
 
 export default function Home() {
   const { data: session, status } = useSession();
+  const isLoading = status === 'loading';
   
   // Refs for animation elements
   const featuresRef = useRef(null);
@@ -16,6 +17,7 @@ export default function Home() {
   const step1Ref = useRef(null);
   const step2Ref = useRef(null);
   const step3Ref = useRef(null);
+  const infoSectionRef = useRef(null); // Added ref for info section
   
   // Intersection Observer setup for scroll animations
   useEffect(() => {
@@ -51,6 +53,17 @@ export default function Home() {
             }
           }
           
+          // If it's the info section, animate the cards
+          if (entry.target === infoSectionRef.current) {
+            const cards = infoSectionRef.current.querySelectorAll('.card-animate-item');
+            cards.forEach((card, index) => {
+              setTimeout(() => {
+                card.style.animation = 'fadeInUp 0.8s ease-out forwards';
+                card.style.animationDelay = `${index * 200}ms`;
+              }, 300 + (index * 200));
+            });
+          }
+          
           // If it's the Sign-Up section, add custom animations to child elements
           if (entry.target === signUpRef.current) {
             const card = signUpRef.current.querySelector('.sign-up-card');
@@ -83,88 +96,247 @@ export default function Home() {
     if (featuresRef.current) observer.observe(featuresRef.current);
     if (howItWorksRef.current) observer.observe(howItWorksRef.current);
     if (signUpRef.current && status === 'unauthenticated') observer.observe(signUpRef.current); // Only observe if not signed in
+    if (infoSectionRef.current && status === 'authenticated') observer.observe(infoSectionRef.current); // Only observe if signed in
     
     // Cleanup
     return () => {
       if (featuresRef.current) observer.unobserve(featuresRef.current);
       if (howItWorksRef.current) observer.unobserve(howItWorksRef.current);
       if (signUpRef.current) observer.unobserve(signUpRef.current);
+      if (infoSectionRef.current) observer.unobserve(infoSectionRef.current);
     };
   }, [status]); // Add status as dependency
   
   return (
     <div className="min-h-screen bg-background">
-      {/* Hero Section with enhanced animation and visual elements */}
-      <div className="relative bg-primary text-white py-24 overflow-hidden">
-        {/* Abstract background shapes */}
-        <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute -top-20 -right-20 w-64 h-64 bg-white opacity-10 rounded-full animate-float"></div>
-          <div className="absolute top-40 -left-20 w-96 h-96 bg-white opacity-5 rounded-full animate-float-slow"></div>
-          <div className="absolute bottom-10 right-10 w-48 h-48 bg-white opacity-10 rounded-full animate-float-reverse"></div>
-          <div className="hidden md:block absolute -bottom-20 left-1/4 w-72 h-72 bg-white opacity-5 rounded-full animate-pulse-slow"></div>
-        </div>
-        
-        {/* Content container with improved layout */}
-        <div className="container mx-auto px-4 relative z-10">
-          <div className="flex flex-col lg:flex-row items-center">
-            {/* Text content with enhanced animations */}
-            <div className="lg:w-1/2 text-center lg:text-left animate-fade-in">
-              <div className="inline-block px-4 py-1 rounded-full bg-white bg-opacity-20 mb-4 animate-slide-up">
-                <span className="text-sm font-medium">A new way to build your skills</span>
+      {/* Updated Skeleton Loading State */}
+      {isLoading ? (
+        <div className="flex flex-col min-h-screen">
+          {/* Hero Section Skeleton */}
+          <div className="relative bg-primary text-white py-24 overflow-hidden" style={{ minHeight: '520px' }}>
+            <div className="container mx-auto px-4 relative z-10">
+              <div className="flex flex-col lg:flex-row items-center">
+                {/* Text content skeleton */}
+                <div className="lg:w-1/2 text-center lg:text-left">
+                  <div className="inline-block w-48 h-6 bg-white bg-opacity-20 rounded-full mb-4"></div>
+                  <div className="h-12 w-full max-w-md bg-white bg-opacity-20 rounded-lg mb-4 animate-pulse"></div>
+                  <div className="h-12 w-3/4 max-w-md bg-white bg-opacity-20 rounded-lg mb-8 animate-pulse"></div>
+                  <div className="h-8 w-1/2 max-w-md bg-white bg-opacity-20 rounded-lg mb-6 animate-pulse"></div>
+                  <div className="flex justify-center lg:justify-start">
+                    <div className="h-12 w-40 bg-white bg-opacity-20 rounded-lg animate-pulse"></div>
+                  </div>
+                </div>
+                
+                {/* Image skeleton */}
+                <div className="lg:w-1/2 mt-10 lg:mt-0">
+                  <div className="relative mx-auto max-w-md">
+                    <div className="w-full h-64 bg-white bg-opacity-20 rounded-xl animate-pulse"></div>
+                  </div>
+                </div>
               </div>
-              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 font-poppins animate-slide-up leading-tight">
-                Connect, <span className="relative inline-block">
-                  Learn <span className="absolute -bottom-1 left-0 w-full h-1 bg-white animate-pulse" ></span>
-                </span>, and Grow with SkillConnect
-              </h1>
-              <p className="text-lg md:text-xl mb-8 animate-slide-up animation-delay-200 max-w-md mx-auto lg:mx-0 opacity-90">
-                Join a community of learners and mentors to share skills, knowledge, and experiences in a collaborative environment.
-              </p>
-              <div className="flex justify-center lg:justify-start">
-                {/* Show different buttons based on authentication status */}
-                {status === 'authenticated' ? (
+            </div>
+            
+            {/* Dark curved bottom edge */}
+            <div className="absolute bottom-0 left-0 right-0">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 100" fill="#0a0a0a">
+                <path d="M0,64L60,69.3C120,75,240,85,360,90.7C480,96,600,96,720,85.3C840,75,960,53,1080,48C1200,43,1320,53,1380,58.7L1440,64L1440,100L1380,100C1320,100,1200,100,1080,100C960,100,840,100,720,100C600,100,480,100,360,100C240,100,120,100,60,100L0,100Z"></path>
+              </svg>
+            </div>
+          </div>
+
+          {/* Features Section Skeleton */}
+          <div className="container mx-auto py-16">
+            <div className="h-10 w-64 bg-gray-200 rounded-lg mx-auto mb-12 animate-pulse"></div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="flex flex-col items-center">
+                  <div className="h-20 w-20 bg-gray-200 rounded-full mb-4 animate-pulse"></div>
+                  <div className="h-6 w-32 bg-gray-200 rounded-lg mb-4 animate-pulse"></div>
+                  <div className="h-20 w-full bg-gray-200 rounded-lg animate-pulse"></div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* How It Works Section Skeleton */}
+          <div className="bg-gradient-to-b from-gray-900 to-gray-800 py-20">
+            <div className="container mx-auto px-4">
+              <div className="max-w-3xl mx-auto text-center mb-16">
+                <div className="h-6 w-36 bg-white bg-opacity-20 rounded-full mb-4 mx-auto animate-pulse"></div>
+                <div className="h-10 w-64 bg-white bg-opacity-20 rounded-lg mx-auto mb-4 animate-pulse"></div>
+                <div className="w-24 h-1 bg-white bg-opacity-20 mx-auto rounded-full mb-6"></div>
+                <div className="h-6 w-full max-w-md bg-white bg-opacity-20 rounded-lg mx-auto animate-pulse"></div>
+              </div>
+              
+              <div className="relative">
+                {/* Connection line skeleton */}
+                <div className="hidden md:block absolute top-1/2 left-0 right-0 h-1 bg-primary bg-opacity-20 transform -translate-y-1/2 z-0"></div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative z-10">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="text-center">
+                      <div className="bg-gray-800 rounded-xl shadow-xl p-8 border border-gray-700 h-full flex flex-col">
+                        <div className="relative mb-6 mx-auto">
+                          <div className="w-20 h-20 bg-primary bg-opacity-30 rounded-full animate-pulse"></div>
+                        </div>
+                        <div className="h-6 w-32 bg-white bg-opacity-20 rounded-lg mb-4 mx-auto animate-pulse"></div>
+                        <div className="h-20 w-full bg-white bg-opacity-10 rounded-lg animate-pulse"></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : status === 'authenticated' ? (
+        // Redesigned Welcome Back Hero Section (matching size with non-logged in section)
+        <div className="relative bg-primary text-white py-24 overflow-hidden">
+          {/* Abstract background shapes */}
+          <div className="absolute inset-0 overflow-hidden">
+            <div className="absolute -top-20 -right-20 w-64 h-64 bg-white opacity-10 rounded-full animate-float"></div>
+            <div className="absolute top-40 -left-20 w-96 h-96 bg-white opacity-5 rounded-full animate-float-slow"></div>
+            <div className="absolute bottom-10 right-10 w-48 h-48 bg-white opacity-10 rounded-full animate-float-reverse"></div>
+            <div className="hidden md:block absolute -bottom-20 left-1/4 w-72 h-72 bg-white opacity-5 rounded-full animate-pulse-slow"></div>
+          </div>
+          
+          {/* Content container with centered profile */}
+          <div className="container mx-auto px-4 relative z-10">
+            <div className="flex flex-col items-center justify-center text-center mb-6">
+              {/* Welcome badge */}
+              <div className="inline-block px-4 py-1 rounded-full bg-white bg-opacity-20 mb-6 animate-slide-up">
+                <span className="text-sm font-medium">Welcome Back</span>
+              </div>
+              
+              {/* Profile Image - Centered */}
+              <div className="mb-6 animate-fade-in">
+                <div className="relative mx-auto">
+                  <div className="w-28 h-28 rounded-full bg-white bg-opacity-20 border-4 border-white border-opacity-30 overflow-hidden shadow-2xl mx-auto transform hover:scale-105 transition-transform duration-500">
+                    {session?.user?.image ? (
+                      <Image
+                        src={session.user.image}
+                        alt={session.user.name || 'Profile'}
+                        width={112}
+                        height={112}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white text-4xl font-bold bg-primary-light">
+                        {session?.user?.name?.charAt(0).toUpperCase() || 'U'}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Decorative elements */}
+                  <div className="absolute -right-2 -bottom-2 w-8 h-8 bg-white bg-opacity-20 rounded-lg animate-float hidden sm:block"></div>
+                  <div className="absolute -left-4 top-1/2 w-6 h-6 bg-white bg-opacity-30 rounded-full animate-float-reverse hidden sm:block"></div>
+                </div>
+              </div>
+              
+              {/* Text content */}
+              <div className="animate-fade-in max-w-2xl mx-auto">
+                <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 font-poppins animate-slide-up leading-tight">
+                  Hello, <span className="text-yellow-300">{session?.user?.name?.split(' ')[0]}</span>!
+                </h1>
+                <p className="text-lg md:text-xl mb-8 animate-slide-up animation-delay-200 max-w-md mx-auto opacity-90">
+                  Ready to continue your learning journey? Connect with others to grow your skills today.
+                </p>
+                
+                {/* Action buttons - UPDATED TEXT COLOR FOR BETTER VISIBILITY */}
+                <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-6 justify-center">
                   <Link
                     href="/connect"
-                    className="inline-block bg-white text-primary px-8 py-4 rounded-lg font-semibold border-2 border-white hover:bg-transparent hover:text-white transition duration-300 animate-bounce-in animation-delay-400"
+                    className="inline-block bg-white text-primary px-6 py-3 rounded-lg font-semibold text-base border-2 border-white hover:bg-transparent hover:text-white transition-all duration-300 shadow-lg transform hover:scale-105 animate-bounce-in animation-delay-400"
                   >
                     Continue Learning
                   </Link>
-                ) : (
+                  <Link
+                    href="/profile"
+                    className="inline-block bg-transparent text-white px-6 py-3 rounded-lg font-semibold text-base border-2 border-white hover:bg-white hover:text-black transition-all duration-300 shadow-lg transform hover:scale-105 animate-bounce-in animation-delay-600"
+                  >
+                    Profile Setup
+                  </Link>
+                  <Link
+                    href="/dashboard"
+                    className="inline-block bg-transparent text-white px-6 py-3 rounded-lg font-semibold text-base border-2 border-white hover:bg-white hover:text-black transition-all duration-300 shadow-lg transform hover:scale-105 animate-bounce-in animation-delay-800"
+                  >
+                    View Dashboard
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          {/* Dark curved bottom edge */}
+          <div className="absolute bottom-0 left-0 right-0">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 100" fill="#0a0a0a">
+              <path d="M0,64L60,69.3C120,75,240,85,360,90.7C480,96,600,96,720,85.3C840,75,960,53,1080,48C1200,43,1320,53,1380,58.7L1440,64L1440,100L1380,100C1320,100,1200,100,1080,100C960,100,840,100,720,100C600,100,480,100,360,100C240,100,120,100,60,100L0,100Z"></path>
+            </svg>
+          </div>
+        </div>
+      ) : (
+        // Original Hero Section for non-logged-in users
+        <div className="relative bg-primary text-white py-24 overflow-hidden">
+          {/* Abstract background shapes */}
+          <div className="absolute inset-0 overflow-hidden">
+            <div className="absolute -top-20 -right-20 w-64 h-64 bg-white opacity-10 rounded-full animate-float"></div>
+            <div className="absolute top-40 -left-20 w-96 h-96 bg-white opacity-5 rounded-full animate-float-slow"></div>
+            <div className="absolute bottom-10 right-10 w-48 h-48 bg-white opacity-10 rounded-full animate-float-reverse"></div>
+            <div className="hidden md:block absolute -bottom-20 left-1/4 w-72 h-72 bg-white opacity-5 rounded-full animate-pulse-slow"></div>
+          </div>
+          
+          {/* Content container with improved layout */}
+          <div className="container mx-auto px-4 relative z-10">
+            <div className="flex flex-col lg:flex-row items-center">
+              {/* Text content with enhanced animations */}
+              <div className="lg:w-1/2 text-center lg:text-left animate-fade-in">
+                <div className="inline-block px-4 py-1 rounded-full bg-white bg-opacity-20 mb-4 animate-slide-up">
+                  <span className="text-sm font-medium">A new way to build your skills</span>
+                </div>
+                <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-4 font-poppins animate-slide-up leading-tight">
+                  Connect, <span className="relative inline-block">
+                    Learn <span className="absolute -bottom-1 left-0 w-full h-1 bg-white animate-pulse" ></span>
+                  </span>, and Grow with SkillConnect
+                </h1>
+                <p className="text-lg md:text-xl mb-8 animate-slide-up animation-delay-200 max-w-md mx-auto lg:mx-0 opacity-90">
+                  Join a community of learners and mentors to share skills, knowledge, and experiences in a collaborative environment.
+                </p>
+                <div className="flex justify-center lg:justify-start">
                   <Link
                     href="/connect"
                     className="inline-block bg-white text-primary px-8 py-4 rounded-lg font-semibold border-2 border-white hover:bg-transparent hover:text-white transition duration-300 animate-bounce-in animation-delay-400"
                   >
                     Start Connecting
                   </Link>
-                )}
+                </div>
               </div>
-            </div>
-            
-            {/* Image/Illustration side */}
-            <div className="lg:w-1/2 mt-10 lg:mt-0 animate-fade-in animation-delay-400">
-              <div className="relative mx-auto max-w-md">
-                <div className="absolute inset-0 bg-gradient-to-r from-primary to-primary-light opacity-50 animate-pulse-slow rounded-xl"></div>
-                <Image
-                  src="/ppl.png" 
-                  alt="People connecting and learning"
-                  width={500}
-                  height={400}
-                  className="relative z-10 rounded-xl shadow-2xl transform hover:scale-105 transition-transform duration-500"
-                />
-                <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-white bg-opacity-20 rounded-lg animate-float"></div>
-                <div className="absolute -left-6 top-1/2 w-12 h-12 bg-white bg-opacity-30 rounded-full animate-float-reverse"></div>
+              
+              {/* Image/Illustration side */}
+              <div className="lg:w-1/2 mt-10 lg:mt-0 animate-fade-in animation-delay-400">
+                <div className="relative mx-auto max-w-md">
+                  <div className="absolute inset-0 bg-gradient-to-r from-primary to-primary-light opacity-50 animate-pulse-slow rounded-xl"></div>
+                  <Image
+                    src="/ppl.png" 
+                    alt="People connecting and learning"
+                    width={500}
+                    height={400}
+                    className="relative z-10 rounded-xl shadow-2xl transform hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-white bg-opacity-20 rounded-lg animate-float"></div>
+                  <div className="absolute -left-6 top-1/2 w-12 h-12 bg-white bg-opacity-30 rounded-full animate-float-reverse"></div>
+                </div>
               </div>
             </div>
           </div>
+          
+          {/* Dark curved bottom edge that transitions to the dark background */}
+          <div className="absolute bottom-0 left-0 right-0">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 100" fill="#0a0a0a"> {/* Using dark color instead of white */}
+              <path d="M0,64L60,69.3C120,75,240,85,360,90.7C480,96,600,96,720,85.3C840,75,960,53,1080,48C1200,43,1320,53,1380,58.7L1440,64L1440,100L1380,100C1320,100,1200,100,1080,100C960,100,840,100,720,100C600,100,480,100,360,100C240,100,120,100,60,100L0,100Z"></path>
+            </svg>
+          </div>
         </div>
-        
-        {/* Dark curved bottom edge that transitions to the dark background */}
-        <div className="absolute bottom-0 left-0 right-0">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 100" fill="#0a0a0a"> {/* Using dark color instead of white */}
-            <path d="M0,64L60,69.3C120,75,240,85,360,90.7C480,96,600,96,720,85.3C840,75,960,53,1080,48C1200,43,1320,53,1380,58.7L1440,64L1440,100L1380,100C1320,100,1200,100,1080,100C960,100,840,100,720,100C600,100,480,100,360,100C240,100,120,100,60,100L0,100Z"></path>
-          </svg>
-        </div>
-      </div>
+      )}
       
       {/* Features Section with staggered fade-in */}
       <div ref={featuresRef} className="container mx-auto py-16 opacity-0 transition-all duration-1000 transform translate-y-10">
@@ -226,7 +398,7 @@ export default function Home() {
           
           <div className="relative">
             {/* Connection line for desktop */}
-            <div className="hidden md:block absolute top-1/2 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary-light to-primary transform -translate-y-1/2 z-0"></div>
+            <div className="hidden md:block absolute top-1/2 left-0 right-0 h-1 bg-primary bg-opacity-20 transform -translate-y-1/2 z-0"></div>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8 relative z-10">
               {[
@@ -276,7 +448,7 @@ export default function Home() {
       </div>
 
       {/* IMPROVED Call-to-Action Section with Animation - Only shown if NOT signed in */}
-      {status === 'unauthenticated' && (
+      {!isLoading && status === 'unauthenticated' && (
         <div ref={signUpRef} className="relative py-20 overflow-hidden opacity-0 transition-all duration-1000 transform translate-y-10">
           {/* Background gradient and shapes */}
           <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary-dark z-0">
@@ -328,10 +500,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* Add a personalized section for signed-in users with same colors as signup */}
-      {status === 'authenticated' && (
-        <div className="relative py-20 overflow-hidden">
-          {/* Same background gradient and shapes as signup section */}
+      {/* Add a simple info section at the bottom for signed-in users */}
+      {!isLoading && status === 'authenticated' && (
+        <div className="relative py-16 overflow-hidden">
+          {/* Background gradient and shapes */}
           <div className="absolute inset-0 bg-gradient-to-br from-primary to-primary-dark z-0">
             <div className="absolute top-0 left-0 w-full h-full bg-pattern opacity-10"></div>
             <div className="absolute -top-20 -right-20 w-96 h-96 bg-white opacity-5 rounded-full animate-float-slow"></div>
@@ -339,64 +511,36 @@ export default function Home() {
           </div>
           
           <div className="container mx-auto px-4 relative z-10">
-            <div className="max-w-4xl mx-auto bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-2xl p-10 shadow-2xl border border-white border-opacity-20">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-                <div>
-                  <h2 className="text-4xl font-bold mb-6 text-white font-poppins leading-tight">
-                    Welcome back, <span className="text-yellow-300">{session?.user?.name?.split(' ')[0]}</span>!
-                  </h2>
-                  <p className="text-xl mb-8 text-white text-opacity-90">
-                    Ready to continue your learning journey? Set up your profile and connect with others to grow your skills today.
-                  </p>
-                  <div className="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
-                    <Link
-                      href="/profile"
-                      className="inline-block bg-white text-primary px-6 py-3 rounded-lg font-semibold text-base border-2 border-white hover:bg-transparent hover:text-white transition-all duration-300 shadow-lg transform hover:scale-105"
-                    >
-                      Profile Setup
-                    </Link>
-                    <Link
-                      href="/dashboard"
-                      className="inline-block bg-transparent text-white px-6 py-3 rounded-lg font-semibold text-base border-2 border-white hover:bg-white hover:text-gray-800 transition-all duration-300 shadow-lg transform hover:scale-105"
-                    >
-                      View Dashboard
-                    </Link>
+            <div ref={infoSectionRef} className="max-w-4xl mx-auto opacity-0 transition-all duration-1000 transform translate-y-10">
+              <h2 className="text-2xl md:text-3xl font-bold text-white text-center mb-8">
+                Getting the Most Out of SkillConnect
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {[
+                  {
+                    title: "Complete Your Profile",
+                    description: "Add your skills and interests to help us match you with the right learning partners."
+                  },
+                  {
+                    title: "Connect Regularly",
+                    description: "Make time for regular learning sessions to build momentum and see real progress."
+                  },
+                  {
+                    title: "Share Your Knowledge",
+                    description: "Remember that teaching is one of the most effective ways to strengthen your own skills."
+                  }
+                ].map((item, index) => (
+                  <div 
+                    key={index} 
+                    className="bg-white bg-opacity-10 backdrop-filter backdrop-blur-sm p-6 rounded-lg shadow-lg border border-white border-opacity-20 transform transition-all duration-700 hover:translate-y--2 hover:shadow-2xl card-animate-item"
+                    style={{animationDelay: `${index * 200}ms`}}
+                  >
+                    <h3 className="text-xl font-semibold text-white mb-4">{item.title}</h3>
+                    <p className="text-white text-opacity-90">
+                      {item.description}
+                    </p>
                   </div>
-                </div>
-                <div className="hidden md:block">
-                  <div className="relative">
-                    {/* Decorative elements - same as signup */}
-                    <div className="absolute -top-4 -right-4 w-20 h-20 bg-yellow-300 bg-opacity-20 rounded-lg animate-float"></div>
-                    <div className="absolute -bottom-4 -left-4 w-16 h-16 bg-primary-light bg-opacity-30 rounded-full animate-float-reverse"></div>
-                    
-                    {/* Profile image container */}
-                    <div className="bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-xl p-6 border border-white border-opacity-20 shadow-lg">
-                      <div className="flex flex-col items-center">
-                        <div className="w-32 h-32 rounded-full bg-white bg-opacity-20 mb-4 overflow-hidden">
-                          {session?.user?.image ? (
-                            <Image
-                              src={session.user.image}
-                              alt={session.user.name || 'Profile'}
-                              width={128}
-                              height={128}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-white text-4xl font-bold">
-                              {session?.user?.name?.charAt(0).toUpperCase() || 'U'}
-                            </div>
-                          )}
-                        </div>
-                        <h3 className="text-white text-xl font-semibold">
-                          {session?.user?.name}
-                        </h3>
-                        <p className="text-white text-opacity-80 text-sm mt-1">
-                          Ready to connect and learn
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           </div>
@@ -466,6 +610,24 @@ export default function Home() {
         
         .step-animate-in {
           animation: popIn 0.6s ease-out forwards;
+        }
+        
+        /* Card animation for info section */
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        
+        .card-animate-item {
+          opacity: 0;
+          transform: translateY(20px);
+          animation: fadeInUp 0.8s ease-out forwards;
         }
         
         /* Sign-up section specific animations */
