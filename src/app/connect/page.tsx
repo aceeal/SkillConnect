@@ -269,8 +269,12 @@ export default function ConnectPage() {
     // Session ready event - both users accepted
     socket.on('session-ready', (data: any) => {
       console.log('Session ready:', data);
+      // Make sure we have the database ID for the peer
+      const peerDbId = data.peer.dbId || data.peer.id;
+      console.log(`Starting session with peer database ID: ${peerDbId}`);
+      
       // Navigate to live session with session data
-      router.push(`/live-session?roomId=${data.roomId}&peerId=${data.peer.id}&peerName=${data.peer.name}&peerDbId=${data.peer.dbId}`);
+      router.push(`/live-session?roomId=${data.roomId}&peerId=${data.peer.id}&peerName=${data.peer.name}&peerDbId=${peerDbId}`);
     });
     
     // Return to queue event
@@ -354,12 +358,14 @@ export default function ConnectPage() {
           // Join queue with user data
           const userData = {
             name: session?.user?.name || 'Anonymous User',
-            id: session?.user?.id,
+            id: socket.id, // Socket ID for socket communications
+            dbId: session?.user?.id, // IMPORTANT: Add the database ID explicitly
             interests: interests.concat(otherInterest ? [otherInterest] : []),
             skills: skills.concat(otherSkill ? [otherSkill] : []),
             profileImage: session?.user?.image || '/default-profile.png'
           };
           
+          console.log('Joining queue with user database ID:', session?.user?.id);
           socket.emit('join-queue', userData);
         });
         
@@ -379,19 +385,21 @@ export default function ConnectPage() {
         // Reset event listeners
         setupSocketListeners(socketRef.current);
         
-        // Join queue with user data
+        // Join queue with user data - MAKE SURE DATABASE ID IS INCLUDED
         const userData = {
           name: session?.user?.name || 'Anonymous User',
-          id: session?.user?.id,
+          id: socketRef.current.id, // Socket ID for socket communications
+          dbId: session?.user?.id, // IMPORTANT: Add the database ID explicitly
           interests: interests.concat(otherInterest ? [otherInterest] : []),
           skills: skills.concat(otherSkill ? [otherSkill] : []),
           profileImage: session?.user?.image || '/default-profile.png'
         };
         
+        console.log('Rejoining queue with user database ID:', session?.user?.id);
         socketRef.current.emit('join-queue', userData);
       }
     }
-  }, [inQueue, session]);
+  }, [inQueue, session, interests, skills, otherInterest, otherSkill]);
 
   // Request queue update when interest or skill changes
   useEffect(() => {
@@ -399,7 +407,8 @@ export default function ConnectPage() {
       // If already in queue and we change our interests/skills, update our profile
       const userData = {
         name: session?.user?.name || 'Anonymous User',
-        id: session?.user?.id,
+        id: socketRef.current.id, // Socket ID
+        dbId: session?.user?.id, // IMPORTANT: Add database ID explicitly
         interests: interests.concat(otherInterest ? [otherInterest] : []),
         skills: skills.concat(otherSkill ? [otherSkill] : []),
         profileImage: session?.user?.image || '/default-profile.png'
@@ -409,7 +418,7 @@ export default function ConnectPage() {
       socketRef.current.emit('update-profile', userData);
       socketRef.current.emit('request-queue-update');
     }
-  }, [interests, skills, otherInterest, otherSkill, session]);
+  }, [interests, skills, otherInterest, otherSkill, session, inQueue]);
 
   const handleSelectInterest = (skill: string) => {
     setInterests((prev) =>
@@ -453,12 +462,15 @@ export default function ConnectPage() {
   };
 
   // Direct call to a specific user in queue
-  const handleCallUser = (userId: string) => {
+  const handleCallUser = (userId: string, userDbId: string) => {
     if (socketRef.current) {
       setCallingUserId(userId);
+      
       socketRef.current.emit('direct-call', { 
         targetId: userId,
-        callerId: socketRef.current.id
+        targetDbId: userDbId, // Send database ID
+        callerId: socketRef.current.id,
+        callerDbId: session?.user?.id // Send caller's database ID
       });
     }
   };
@@ -468,7 +480,9 @@ export default function ConnectPage() {
     if (socketRef.current && matchId) {
       socketRef.current.emit('match-response', {
         matchId: matchId,
-        accepted: true
+        accepted: true,
+        // Add database ID to ensure server has it
+        userDbId: session?.user?.id
       });
       setMatchAccepted(true);
       setWaitingForMatch(true);
@@ -814,6 +828,9 @@ export default function ConnectPage() {
                     </div>
                     <div>
                       <h3 className="text-xl font-bold text-black">{matchedUser?.name}</h3>
+                      <div className="text-xs text-gray-500">
+                        Database ID: {matchedUser?.dbId || "Not available"}
+                      </div>
                     </div>
                   </div>
                   
@@ -887,7 +904,12 @@ export default function ConnectPage() {
                                 className="w-full h-full object-cover" 
                               />
                             </div>
-                            <h3 className="text-lg font-semibold text-black">{user.name}</h3>
+                            <div>
+                              <h3 className="text-lg font-semibold text-black">{user.name}</h3>
+                              <div className="text-xs text-gray-500">
+                                Database ID: {user.dbId || "Not available"}
+                              </div>
+                            </div>
                           </div>
                           
                           <div className="mb-3">
@@ -913,7 +935,7 @@ export default function ConnectPage() {
                           </div>
                           
                           <button
-                            onClick={() => handleCallUser(user.id)}
+                            onClick={() => handleCallUser(user.id, user.dbId)}
                             className="w-full py-2 bg-blue-500 text-white rounded-lg font-medium border-2 border-blue-500 hover:bg-transparent hover:text-blue-500 transition duration-300"
                           >
                             Call Now
@@ -933,6 +955,9 @@ export default function ConnectPage() {
                       className="w-24 h-24 rounded-full mx-auto mb-4 object-cover"
                     />
                     <h3 className="text-xl font-bold text-black mb-2">{matchedUser?.name || 'User'}</h3>
+                    <div className="text-xs text-gray-500 mb-2">
+                      Database ID: {matchedUser?.dbId || "Not available"}
+                    </div>
                     <p className="text-black mb-4">
                       {waitingForMatch ? `Waiting for ${matchedUser?.name || 'user'} to respond...` : 'Calling user...'}
                     </p>

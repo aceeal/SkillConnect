@@ -6,8 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import io from 'socket.io-client';
 import { FaVideo, FaVideoSlash, FaMicrophone, FaMicrophoneSlash, 
   FaVolumeUp, FaVolumeMute, FaDesktop, FaPhoneSlash, FaFlag, FaStop,
-  FaUserFriends, FaHandshake, FaLightbulb, FaExpand, FaCompress } from 'react-icons/fa';
-import ChatComponent from '../components/chat-component';
+  FaLightbulb, FaExpand, FaCompress, FaHome, FaUndo, FaPaperPlane } from 'react-icons/fa';
 import ReportModal from '../components/report-modal';
 import { Suspense } from 'react';
 
@@ -20,7 +19,7 @@ function LiveSessionPageContent() {
   const roomId = searchParams.get('roomId') || 'live-session-room';
   const peerId = searchParams.get('peerId') || '';
   const peerName = searchParams.get('peerName') || 'Remote User';
-  const peerDbId = searchParams.get('peerDbId') || ''; // Add this to get the actual database ID
+  const peerDbId = searchParams.get('peerDbId') || '';
   
   // References for layout calculations
   const pageContainerRef = useRef(null);
@@ -38,6 +37,10 @@ function LiveSessionPageContent() {
   const [isConnecting, setIsConnecting] = useState(true);
   const [isConnected, setIsConnected] = useState(false);
   const [connectionFailed, setConnectionFailed] = useState(false);
+  
+  // Add a new state for tracking remote user disconnection
+  const [remoteUserDisconnected, setRemoteUserDisconnected] = useState(false);
+  const [disconnectionReason, setDisconnectionReason] = useState('');
   
   // Media state with default values from settings
   const [isCameraOn, setIsCameraOn] = useState(true);
@@ -113,7 +116,7 @@ function LiveSessionPageContent() {
   const [userSettings, setUserSettings] = useState(null);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   
-  // User profile states - UPDATED to track both socket ID and database ID
+  // User profile states
   const [localUserProfile, setLocalUserProfile] = useState({
     name: session?.user?.name || 'You',
     interests: [],
@@ -123,14 +126,15 @@ function LiveSessionPageContent() {
   });
   
   const [remoteUserProfile, setRemoteUserProfile] = useState({
-    socketId: peerId || '', // Socket ID for WebRTC connection
-    dbId: peerDbId || '', // Database ID for reporting and profile viewing
+    socketId: peerId || '',
+    dbId: peerDbId || '',
     name: peerName || 'Remote User',
     interests: [],
     skills: [],
     connectInterests: [],
     connectSkills: [],
-    profileImage: ''
+    profileImage: '',
+    isCameraOn: true // Track remote user's camera state
   });
   
   // Profile picture from user's profile
@@ -147,6 +151,10 @@ function LiveSessionPageContent() {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   
+  // Chat refs (merged from ChatComponent)
+  const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  
   // For debugging
   const [logs, setLogs] = useState([]);
   
@@ -156,11 +164,17 @@ function LiveSessionPageContent() {
     setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
   };
   
-  // Calculate layout heights on mount and window resize
+  // Scroll to bottom of chat when messages change
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+  
+  // Calculate layout heights with correct aspect ratio
   useEffect(() => {
     const calculateHeights = () => {
-      // Calculate available height for content (viewport height minus navbar and footer)
-      // Assuming navbar is 64px (h-16) and footer is approximately 120px
+      // Calculate available height for content
       const navbarHeight = 64;
       const footerHeight = 120;
       const viewportHeight = window.innerHeight;
@@ -168,19 +182,21 @@ function LiveSessionPageContent() {
       
       setContentHeight(availableHeight);
       
-      // If we have the video container reference, calculate its height
       if (videoContainerRef.current) {
-        // For 16:9 ratio: if container width is W, height should be W * (9/16)
-        const containerWidth = videoContainerRef.current.clientWidth;
-        // Calculate height for 16:9 aspect ratio
-        const aspectRatioHeight = containerWidth * (9/16);
+        // Get the video container width (3/4 of container width)
+        const videoContainerWidth = videoContainerRef.current.clientWidth * 0.75;
         
-        // Use the calculated height, but ensure it doesn't exceed available content height
-        const calculatedVideoHeight = Math.min(aspectRatioHeight, availableHeight * 0.8);
-        setVideoHeight(calculatedVideoHeight);
+        // Calculate 16:9 aspect ratio height
+        const aspectRatioHeight = videoContainerWidth * (9/16);
         
-        // Calculate remaining height
-        const newRemainingHeight = availableHeight - calculatedVideoHeight - 20; // 20px for margins
+        // Ensure the video takes up about 75% of the available space vertically
+        // but doesn't exceed the 16:9 aspect ratio
+        const targetHeight = Math.min(aspectRatioHeight, availableHeight * 0.75);
+        
+        setVideoHeight(targetHeight);
+        
+        // Calculate remaining space
+        const newRemainingHeight = availableHeight - targetHeight - 50; // margins, etc.
         setRemainingHeight(newRemainingHeight);
       }
     };
@@ -255,7 +271,7 @@ function LiveSessionPageContent() {
     }
   }, [session, status, searchParams]);
   
-  // UPDATED: Fetch remote user profile data if we don't have a database ID
+  // Fetch remote user profile data if we don't have a database ID
   useEffect(() => {
     const fetchRemoteUserProfile = async () => {
       if (!remoteUserProfile.dbId && remoteUserProfile.socketId) {
@@ -445,6 +461,8 @@ function LiveSessionPageContent() {
     setIsConnecting(true);
     setIsConnected(false);
     setConnectionFailed(false);
+    setRemoteUserDisconnected(false); // Reset disconnection state
+    setDisconnectionReason('');
     
     addLog('Starting connection process');
     addLog(`Initial camera state: ${isCameraOn ? 'ON' : 'OFF'}`);
@@ -542,9 +560,35 @@ function LiveSessionPageContent() {
       await handleIceCandidate(data);
     });
     
+    // Enhanced user disconnection handling
     socket.on('user-disconnected', (userId) => {
       addLog(`User disconnected: ${userId}`);
       setIsConnected(false);
+      
+      // Set the remote user as disconnected
+      setRemoteUserDisconnected(true);
+      setDisconnectionReason('left the session');
+    });
+    
+    // Handle session terminated by admin or errors
+    socket.on('session-terminated', (data) => {
+      addLog(`Session terminated: ${data?.reason || 'unknown reason'}`);
+      setIsConnected(false);
+      setRemoteUserDisconnected(true);
+      
+      if (data?.reason === 'admin') {
+        setDisconnectionReason('terminated by an administrator');
+      } else {
+        setDisconnectionReason('ended unexpectedly');
+      }
+    });
+    
+    // Handle session disconnection
+    socket.on('session-disconnected', () => {
+      addLog('Session disconnected');
+      setIsConnected(false);
+      setRemoteUserDisconnected(true);
+      setDisconnectionReason('disconnected from the session');
     });
     
     // Handle chat messages
@@ -705,11 +749,47 @@ function LiveSessionPageContent() {
           if (remoteVideoRef.current && event.streams && event.streams[0]) {
             addLog('Setting remote video stream');
             remoteVideoRef.current.srcObject = event.streams[0];
+            
+            // Listen for video track enable/disable status
+            const videoTrack = event.streams[0].getVideoTracks()[0];
+            if (videoTrack) {
+              // Check initial state
+              setRemoteUserProfile(prev => ({
+                ...prev,
+                isCameraOn: videoTrack.enabled
+              }));
+              
+              // Set up track mute/unmute monitor
+              videoTrack.onmute = () => {
+                setRemoteUserProfile(prev => ({
+                  ...prev,
+                  isCameraOn: false
+                }));
+              };
+              
+              videoTrack.onunmute = () => {
+                setRemoteUserProfile(prev => ({
+                  ...prev,
+                  isCameraOn: true
+                }));
+              };
+              
+              // Set up ended event monitor
+              videoTrack.onended = () => {
+                setRemoteUserProfile(prev => ({
+                  ...prev,
+                  isCameraOn: false
+                }));
+              };
+            }
+            
             try {
               remoteVideoRef.current.play();
               addLog('Remote video playing');
               setIsConnected(true);
               setIsConnecting(false);
+              // Reset disconnection state when tracks are received
+              setRemoteUserDisconnected(false);
             } catch (e) {
               addLog(`Remote video play failed: ${e.message}`);
             }
@@ -724,6 +804,7 @@ function LiveSessionPageContent() {
           if (peerConnection.connectionState === 'connected') {
             setIsConnected(true);
             setIsConnecting(false);
+            setRemoteUserDisconnected(false);
           } else if (peerConnection.connectionState === 'failed' || 
                      peerConnection.connectionState === 'disconnected' || 
                      peerConnection.connectionState === 'closed') {
@@ -732,6 +813,13 @@ function LiveSessionPageContent() {
             if (peerConnection.connectionState === 'failed') {
               setConnectionFailed(true);
               setIsConnecting(false);
+            } else if (peerConnection.connectionState === 'disconnected' || 
+                      peerConnection.connectionState === 'closed') {
+              // Handle disconnection state
+              setRemoteUserDisconnected(true);
+              setDisconnectionReason(peerConnection.connectionState === 'disconnected' 
+                ? 'lost connection' 
+                : 'closed the connection');
             }
           }
         };
@@ -742,6 +830,7 @@ function LiveSessionPageContent() {
               peerConnection.iceConnectionState === 'completed') {
             setIsConnected(true);
             setIsConnecting(false);
+            setRemoteUserDisconnected(false);
           } else if (peerConnection.iceConnectionState === 'failed' || 
                      peerConnection.iceConnectionState === 'disconnected' || 
                      peerConnection.iceConnectionState === 'closed') {
@@ -750,6 +839,13 @@ function LiveSessionPageContent() {
             if (peerConnection.iceConnectionState === 'failed') {
               setConnectionFailed(true);
               setIsConnecting(false);
+            } else if (peerConnection.iceConnectionState === 'disconnected' || 
+                      peerConnection.iceConnectionState === 'closed') {
+              // Handle ICE disconnection state
+              setRemoteUserDisconnected(true);
+              setDisconnectionReason(peerConnection.iceConnectionState === 'disconnected' 
+                ? 'lost connection' 
+                : 'closed the connection');
             }
           }
         };
@@ -1142,7 +1238,33 @@ function LiveSessionPageContent() {
     }
   };
   
-  // Update this function in src/app/live-session/page.tsx
+  // Function to try reconnecting after disconnect
+  const tryReconnect = () => {
+    // Clear disconnection state
+    setRemoteUserDisconnected(false);
+    setDisconnectionReason('');
+    
+    // Close old connection if exists
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    
+    // Reconnect to the socket server
+    if (socketRef.current) {
+      // Disconnect first if connected
+      if (socketRef.current.connected) {
+        socketRef.current.disconnect();
+      }
+      
+      // Reconnect
+      socketRef.current.connect();
+    }
+    
+    // Set connecting state to show loading indicator
+    setIsConnecting(true);
+  };
+  
   const endCall = () => {
     addLog('Ending call...');
     
@@ -1183,14 +1305,15 @@ function LiveSessionPageContent() {
     return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
   
-  // Chat function to send message
+  // Chat functions (merged from ChatComponent)
   const sendMessage = () => {
     if (!newMessage.trim() || !socketRef.current) return;
     
     const messageData = {
       text: newMessage,
       sender: localUserProfile.name,
-      timestamp: getFormattedTime()
+      timestamp: getFormattedTime(),
+      senderImage: profilePicture
     };
     
     // Add message to local state
@@ -1207,7 +1330,15 @@ function LiveSessionPageContent() {
     addLog(`Sent chat message: ${newMessage}`);
   };
   
-  // UPDATED: Handle report submission with proper database ID
+  // Handle Enter key in chat input
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+  
+  // Handle report submission with proper database ID
   const handleSubmitReport = async () => {
     if (!reportReason) {
       alert('Please select a reason for reporting');
@@ -1288,354 +1419,526 @@ function LiveSessionPageContent() {
       }}
       ref={pageContainerRef}
     >
-      <div className="flex-grow container mx-auto px-6 flex flex-col py-2">
-        {/* Profile Header */}
-        {(isConnected || isConnecting) && (
-          <div className="bg-gray-900 rounded-lg p-3 mb-3 shadow-lg">
-            <div className="flex items-center justify-between">
-              {/* Local user profile summary */}
-              <div className="flex items-center space-x-2">
-                <a 
-                  href="/profile" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="cursor-pointer"
-                >
-                  <div className="w-10 h-10 rounded-full bg-blue-500 overflow-hidden">
-                    {profilePicture ? (
-                      <img 
-                        src={profilePicture || '/default-profile.png'} 
-                        alt={localUserProfile.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-white text-lg font-bold">
-                        {localUserProfile.name.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                  </div>
-                </a>
-                <div>
-                  <h3 className="font-medium text-white">{localUserProfile.name}</h3>
-                  <div className="flex space-x-1">
-                    {localUserProfile.skills.slice(0, 2).map((skill, idx) => (
-                      <span key={idx} className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
-                        {skill}
-                      </span>
-                    ))}
-                    {localUserProfile.skills.length > 2 && (
-                      <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
-                        +{localUserProfile.skills.length - 2}
-                      </span>
-                    )}
-                  </div>
+      <div className="flex-grow container mx-auto px-6 flex flex-col py-2 h-full overflow-hidden">
+        {/* Profile Header - ALWAYS VISIBLE with placeholder when not connected */}
+        <div className="bg-gray-900 rounded-lg p-3 mb-3 shadow-lg flex-shrink-0">
+          <div className="flex items-center justify-between">
+            {/* Local user profile summary */}
+            <div className="flex items-center space-x-2">
+              <a 
+                href="/profile" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-full bg-blue-500 overflow-hidden">
+                  {profilePicture ? (
+                    <img 
+                      src={profilePicture || '/default-profile.png'} 
+                      alt={localUserProfile.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-white text-lg font-bold">
+                      {localUserProfile.name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
                 </div>
-              </div>
-              
-              {/* Session info and matching indicators */}
-              <div className="text-center flex flex-col items-center">
-                <div className="bg-black bg-opacity-70 px-4 py-1 rounded-full text-white mb-1">
-                  <span className="font-medium">Session: {formatDuration(sessionDuration)}</span>
+              </a>
+              <div>
+                <h3 className="font-medium text-white">{localUserProfile.name}</h3>
+                <div className="flex space-x-1">
+                  {localUserProfile.skills.slice(0, 2).map((skill, idx) => (
+                    <span key={idx} className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                      {skill}
+                    </span>
+                  ))}
+                  {localUserProfile.skills.length > 2 && (
+                    <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
+                      +{localUserProfile.skills.length - 2}
+                    </span>
+                  )}
                 </div>
-                {matchingInterests.length > 0 && (
-                  <div className="text-xs px-3 py-1 bg-amber-500 rounded-full text-white">
-                    {matchingInterests.length} shared {matchingInterests.length === 1 ? 'interest' : 'interests'}
-                  </div>
-                )}
-              </div>
-              
-              {/* Remote user profile summary */}
-              <div className="flex items-center space-x-2">
-                <div>
-                  <h3 className="font-medium text-white text-right">{remoteUserProfile.name}</h3>
-                  <div className="flex space-x-1 justify-end">
-                    {remoteUserProfile.skills.slice(0, 2).map((skill, idx) => (
-                      <span key={idx} className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full">
-                        {skill}
-                      </span>
-                    ))}
-                    {remoteUserProfile.skills.length > 2 && (
-                      <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full">
-                        +{remoteUserProfile.skills.length - 2}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <a 
-                  href={remoteUserProfile.dbId ? `/user/${remoteUserProfile.dbId}` : '#'}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    if (remoteUserProfile.dbId) {
-                      window.open(`/user/${remoteUserProfile.dbId}`, '_blank');
-                    }
-                  }}
-                  className="cursor-pointer"
-                >
-                  <div className="w-10 h-10 rounded-full bg-purple-500 overflow-hidden">
-                    {remoteUserProfile.profileImage ? (
-                      <img 
-                        src={remoteUserProfile.profileImage} 
-                        alt={remoteUserProfile.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-white text-lg font-bold">
-                        {remoteUserProfile.name.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                  </div>
-                </a>
               </div>
             </div>
+            
+            {/* Session info and matching indicators */}
+            <div className="text-center flex flex-col items-center">
+              <div className="bg-black bg-opacity-70 px-4 py-1 rounded-full text-white mb-1">
+                <span className="font-medium">Session: {formatDuration(sessionDuration)}</span>
+              </div>
+              {matchingInterests.length > 0 && (
+                <div className="text-xs px-3 py-1 bg-amber-500 rounded-full text-white">
+                  {matchingInterests.length} shared {matchingInterests.length === 1 ? 'interest' : 'interests'}
+                </div>
+              )}
+            </div>
+            
+            {/* Remote user profile summary */}
+            <div className="flex items-center space-x-2">
+              <div>
+                <h3 className="font-medium text-white text-right">{remoteUserProfile.name}</h3>
+                <div className="flex space-x-1 justify-end">
+                  {remoteUserProfile.skills.slice(0, 2).map((skill, idx) => (
+                    <span key={idx} className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full">
+                      {skill}
+                    </span>
+                  ))}
+                  {remoteUserProfile.skills.length > 2 && (
+                    <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full">
+                      +{remoteUserProfile.skills.length - 2}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <a 
+                href={remoteUserProfile.dbId ? `/user/${remoteUserProfile.dbId}` : '#'}
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (remoteUserProfile.dbId) {
+                    window.open(`/user/${remoteUserProfile.dbId}`, '_blank');
+                  }
+                }}
+                className="cursor-pointer"
+              >
+                <div className="w-10 h-10 rounded-full bg-purple-500 overflow-hidden">
+                  {remoteUserProfile.profileImage ? (
+                    <img 
+                      src={remoteUserProfile.profileImage} 
+                      alt={remoteUserProfile.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-white text-lg font-bold">
+                      {remoteUserProfile.name.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+              </a>
+            </div>
           </div>
-        )}
+        </div>
         
         {/* Main content area with video and sidebar */}
-        <div className="flex flex-1 gap-3 overflow-hidden" ref={videoContainerRef}>
+        <div className="flex flex-1 gap-3 overflow-hidden min-h-0" ref={videoContainerRef}>
           {/* Video Section (Left) with 16:9 aspect ratio */}
-          <div className="w-3/4 flex flex-col">
+          {/* Video Section (Left) with flex layout to push Session Tips to bottom */}
+          <div className="w-3/4 flex flex-col h-full overflow-hidden justify-between">
+            {/* Video container with forced 16:9 aspect ratio */}
             <div 
-              className="relative w-full rounded-lg overflow-hidden shadow-2xl bg-black"
+              className="relative w-full rounded-lg overflow-hidden shadow-2xl bg-black flex-grow"
               style={{ 
-                height: videoHeight || 'auto', 
-                minHeight: '300px' 
+                paddingTop: '56.25%', /* 9/16 = 0.5625 or 56.25% - forces 16:9 ratio */
+                height: 0,
+                minHeight: 0
               }}
               ref={videoContainerFullscreenRef}
             >
-              {/* Remote Video - Main view */}
-              <video 
-                ref={remoteVideoRef} 
-                autoPlay 
-                playsInline
-                muted={!isVolumeOn}
-                className="w-full h-full object-cover" 
-              />
-              
-              {/* Connection states overlays */}
-              {isConnecting && !isConnected && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-80 text-white">
-                  <div className="w-16 h-16 border-t-4 border-blue-500 border-solid rounded-full animate-spin mb-4"></div>
-                  <div className="text-xl font-medium">Connecting to {remoteUserProfile.name}...</div>
-                </div>
-              )}
-              
-              {connectionFailed && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-80 text-white">
-                  <div className="text-red-500 text-6xl mb-4">⚠️</div>
-                  <div className="text-xl font-medium">Connection failed</div>
-                  <button 
-                    onClick={() => router.push('/connect')}
-                    className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                  >
-                    Return to Connect
-                  </button>
-                </div>
-              )}
-              
-              {/* Picture-in-Picture local video */}
-              <div className="absolute bottom-4 right-4 w-1/4 z-10 rounded-lg overflow-hidden shadow-lg border-2 border-white">
-                <div className="relative pb-[56.25%]"> {/* 16:9 aspect ratio */}
+              {/* Absolutely positioned content inside the 16:9 container */}
+              <div className="absolute inset-0">
+                {/* Remote Video - Main view */}
+                <div className="relative w-full h-full">
                   <video 
-                    ref={localVideoRef} 
+                    ref={remoteVideoRef} 
                     autoPlay 
-                    playsInline 
-                    muted 
-                    className="absolute inset-0 w-full h-full object-cover bg-gray-800" 
+                    playsInline
+                    muted={!isVolumeOn}
+                    className="w-full h-full object-cover" 
                   />
                   
-                  {/* User badge in top-left corner of PiP */}
-                  <div className="absolute top-1 left-1 flex items-center bg-black bg-opacity-50 rounded px-1 z-10">
-                    <span className="text-white text-xs">{localUserProfile.name}</span>
-                    {isMicOn ? 
-                      <FaMicrophone className="text-green-500 w-2 h-2 ml-1" /> : 
-                      <FaMicrophoneSlash className="text-red-500 w-2 h-2 ml-1" />
-                    }
-                  </div>
-                  
-                  {/* Camera off indicator */}
-                  {!isCameraOn && !isScreenSharing && (
+                  {/* Remote user camera off display */}
+                  {isConnected && !remoteUserProfile.isCameraOn && (
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900">
-                      <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
-                        {localUserProfile.name.charAt(0).toUpperCase()}
+                      <div className="w-32 h-32 rounded-full bg-purple-500 flex items-center justify-center overflow-hidden border-2 border-purple-400">
+                        {remoteUserProfile.profileImage ? (
+                          <img 
+                            src={remoteUserProfile.profileImage} 
+                            alt={remoteUserProfile.name}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.target.onerror = null;
+                              e.target.src = '/default-profile.png';
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-white text-4xl font-bold bg-purple-600">
+                            {remoteUserProfile.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                      <div className="mt-4 text-white font-medium">
+                        {remoteUserProfile.name}'s camera is off
                       </div>
                     </div>
                   )}
                 </div>
-              </div>
-              
-              {/* Control bar overlay */}
-              {isConnected && (
-                <div 
-                  className="absolute bottom-4 inset-x-0 flex justify-center z-20"
-                  onMouseEnter={() => setShowControls(true)}
-                >
-                  <div 
-                    className={`bg-black bg-opacity-60 rounded-full py-2 px-4 flex space-x-6 items-center transition-opacity duration-300 ${
-                      showControls ? 'opacity-100' : 'opacity-0'
-                    }`}
-                  >
-                    {/* Camera Control */}
-                    <button
-                      onClick={toggleCamera}
-                      disabled={isScreenSharing}
-                      className={`p-3 rounded-full ${
-                        isScreenSharing 
-                          ? 'text-gray-400 cursor-not-allowed' 
-                          : isCameraOn 
-                            ? 'text-white hover:bg-gray-700' 
-                            : 'bg-red-500 text-white hover:bg-red-600'
-                      }`}
+                
+                {/* Connection states overlays */}
+                {isConnecting && !isConnected && !remoteUserDisconnected && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-80 text-white">
+                    <div className="w-16 h-16 border-t-4 border-blue-500 border-solid rounded-full animate-spin mb-4"></div>
+                    <div className="text-xl font-medium">Connecting to {remoteUserProfile.name}...</div>
+                  </div>
+                )}
+                
+                {connectionFailed && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-80 text-white">
+                    <div className="text-red-500 text-6xl mb-4">⚠️</div>
+                    <div className="text-xl font-medium">Connection failed</div>
+                    <button 
+                      onClick={() => router.push('/connect')}
+                      className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
                     >
-                      {isCameraOn ? (
-                        <FaVideo className="w-5 h-5" />
-                      ) : (
-                        <FaVideoSlash className="w-5 h-5" />
+                      Return to Connect
+                    </button>
+                  </div>
+                )}
+                
+                {/* NEW: Remote user disconnection overlay */}
+                {remoteUserDisconnected && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-90 text-white animate-fade-in">
+                    <div className="text-yellow-500 text-6xl mb-6">
+                      {disconnectionReason.includes('left') ? 
+                        <FaStop /> : 
+                        disconnectionReason.includes('lost') ? 
+                          <FaUndo /> : 
+                          <FaStop />
+                      }
+                    </div>
+                    <div className="text-2xl font-medium mb-2 text-center">
+                      {remoteUserProfile.name} has {disconnectionReason}
+                    </div>
+                    <p className="text-gray-300 mb-6 text-center max-w-md">
+                      {disconnectionReason.includes('left') || disconnectionReason.includes('closed') ? 
+                        "The session has ended. You can return to the connect page to find another partner." : 
+                        "The connection was lost. You can try reconnecting or return to the connect page."
+                      }
+                    </p>
+                    <div className="flex space-x-4">
+                      {/* Show reconnect button only for lost connections */}
+                      {disconnectionReason.includes('lost') && (
+                        <button 
+                          onClick={tryReconnect}
+                          className="px-4 py-2 bg-yellow-500 text-black rounded-lg hover:bg-yellow-400 flex items-center"
+                        >
+                          <FaUndo className="mr-2" /> Try Reconnecting
+                        </button>
                       )}
-                    </button>
-                    
-                    {/* Microphone Control */}
-                    <button
-                      onClick={toggleMic}
-                      className={`p-3 rounded-full ${
-                        isMicOn 
-                          ? 'text-white hover:bg-gray-700' 
-                          : 'bg-red-500 text-white hover:bg-red-600'
-                      }`}
-                    >
-                      {isMicOn ? (
-                        <FaMicrophone className="w-5 h-5" />
-                      ) : (
-                        <FaMicrophoneSlash className="w-5 h-5" />
-                      )}
-                    </button>
-                    
-                    {/* Screen Sharing Control */}
-                    <button
-                      onClick={shareScreen}
-                      className={`p-3 rounded-full ${
-                        isScreenSharing 
-                          ? 'bg-red-500 text-white hover:bg-red-600' 
-                          : 'text-white hover:bg-gray-700'
-                      }`}
-                    >
-                      {isScreenSharing ? (
-                        <FaStop className="w-5 h-5" />
-                      ) : (
-                        <FaDesktop className="w-5 h-5" />
-                      )}
-                    </button>
-                    
-                    {/* End Call Control */}
-                    <button
-                      onClick={endCall}
-                      className="p-3 bg-red-500 text-white rounded-full hover:bg-red-600"
-                    >
-                      <FaPhoneSlash className="w-5 h-5" />
-                    </button>
-                    
-                    {/* Volume Control */}
-                    <div className="relative">
-                      <button
-                        onClick={toggleVolume}
-                        onMouseEnter={() => setShowVolumeSlider(true)}
-                        className={`p-3 rounded-full ${isVolumeOn ? 'text-white hover:bg-gray-700' : 'bg-red-500 text-white hover:bg-red-600'}`}
+                      <button 
+                        onClick={() => router.push('/connect')}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center"
                       >
-                        {isVolumeOn ? (
-                          <FaVolumeUp className="w-5 h-5" />
+                        <FaHome className="mr-2" /> Return to Connect
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Picture-in-Picture local video */}
+                <div className="absolute bottom-4 right-4 w-1/4 z-10 rounded-lg overflow-hidden shadow-lg border-2 border-white">
+                  <div className="relative pb-[56.25%]"> {/* 16:9 aspect ratio */}
+                    <video 
+                      ref={localVideoRef} 
+                      autoPlay 
+                      playsInline 
+                      muted 
+                      className="absolute inset-0 w-full h-full object-cover bg-gray-800" 
+                    />
+                    
+                    {/* User badge in top-left corner of PiP */}
+                    <div className="absolute top-1 left-1 flex items-center bg-black bg-opacity-50 rounded px-1 z-10">
+                      <span className="text-white text-xs">{localUserProfile.name}</span>
+                      {isMicOn ? 
+                        <FaMicrophone className="text-green-500 w-2 h-2 ml-1" /> : 
+                        <FaMicrophoneSlash className="text-red-500 w-2 h-2 ml-1" />
+                      }
+                    </div>
+                    
+                    {/* Camera off indicator with profile picture */}
+                    {!isCameraOn && !isScreenSharing && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900">
+                        <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center overflow-hidden border-2 border-blue-400">
+                          {profilePicture ? (
+                            <img 
+                              src={profilePicture} 
+                              alt={localUserProfile.name}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.target.onerror = null;
+                                e.target.src = '/default-profile.png';
+                              }}
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-white text-xl font-bold bg-blue-600">
+                              {localUserProfile.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Control bar overlay */}
+                {(isConnected || remoteUserDisconnected) && (
+                  <div 
+                    className="absolute bottom-4 inset-x-0 flex justify-center z-20"
+                    onMouseEnter={() => setShowControls(true)}
+                  >
+                    <div 
+                      className={`bg-black bg-opacity-60 rounded-full py-2 px-4 flex space-x-6 items-center transition-opacity duration-300 ${
+                        showControls ? 'opacity-100' : 'opacity-0'
+                      }`}
+                    >
+                      {/* Only show media controls if connected */}
+                      {isConnected && (
+                        <>
+                          {/* Camera Control */}
+                          <button
+                            onClick={toggleCamera}
+                            disabled={isScreenSharing}
+                            className={`p-3 rounded-full ${
+                              isScreenSharing 
+                                ? 'text-gray-400 cursor-not-allowed' 
+                                : isCameraOn 
+                                  ? 'text-white hover:bg-gray-700' 
+                                  : 'bg-red-500 text-white hover:bg-red-600'
+                            }`}
+                          >
+                            {isCameraOn ? (
+                              <FaVideo className="w-5 h-5" />
+                            ) : (
+                              <FaVideoSlash className="w-5 h-5" />
+                            )}
+                          </button>
+                          
+                          {/* Microphone Control */}
+                          <button
+                            onClick={toggleMic}
+                            className={`p-3 rounded-full ${
+                              isMicOn 
+                                ? 'text-white hover:bg-gray-700' 
+                                : 'bg-red-500 text-white hover:bg-red-600'
+                            }`}
+                          >
+                            {isMicOn ? (
+                              <FaMicrophone className="w-5 h-5" />
+                            ) : (
+                              <FaMicrophoneSlash className="w-5 h-5" />
+                            )}
+                          </button>
+                          
+                          {/* Screen Sharing Control */}
+                          <button
+                            onClick={shareScreen}
+                            className={`p-3 rounded-full ${
+                              isScreenSharing 
+                                ? 'bg-red-500 text-white hover:bg-red-600' 
+                                : 'text-white hover:bg-gray-700'
+                            }`}
+                          >
+                            {isScreenSharing ? (
+                              <FaStop className="w-5 h-5" />
+                            ) : (
+                              <FaDesktop className="w-5 h-5" />
+                            )}
+                          </button>
+                          
+                          {/* Volume Control */}
+                          <div className="relative">
+                            <button
+                              onClick={toggleVolume}
+                              onMouseEnter={() => setShowVolumeSlider(true)}
+                              className={`p-3 rounded-full ${isVolumeOn ? 'text-white hover:bg-gray-700' : 'bg-red-500 text-white hover:bg-red-600'}`}
+                            >
+                              {isVolumeOn ? (
+                                <FaVolumeUp className="w-5 h-5" />
+                              ) : (
+                                <FaVolumeMute className="w-5 h-5" />
+                              )}
+                            </button>
+                            
+                            {/* Volume slider */}
+                            {showVolumeSlider && (
+                              <div 
+                                className="absolute -top-20 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 p-2 rounded-lg z-10"
+                                onMouseLeave={() => setShowVolumeSlider(false)}
+                              >
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="100"
+                                  value={volumeLevel}
+                                  onChange={handleVolumeChange}
+                                  className="w-24 accent-white"
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      
+                      {/* Always show these controls */}
+                      {/* End Call Control */}
+                      <button
+                        onClick={endCall}
+                        className="p-3 bg-red-500 text-white rounded-full hover:bg-red-600"
+                      >
+                        <FaPhoneSlash className="w-5 h-5" />
+                      </button>
+                      
+                      {/* Fullscreen Button */}
+                      <button
+                        onClick={toggleFullScreen}
+                        className="p-3 text-white rounded-full hover:bg-gray-700"
+                      >
+                        {isFullScreen ? (
+                          <FaCompress className="w-5 h-5" />
                         ) : (
-                          <FaVolumeMute className="w-5 h-5" />
+                          <FaExpand className="w-5 h-5" />
                         )}
                       </button>
                       
-                      {/* Volume slider */}
-                      {showVolumeSlider && (
-                        <div 
-                          className="absolute -top-20 left-1/2 transform -translate-x-1/2 bg-black bg-opacity-70 p-2 rounded-lg z-10"
-                          onMouseLeave={() => setShowVolumeSlider(false)}
+                      {/* Only show report button if connected */}
+                      {isConnected && (
+                        <button
+                          onClick={() => setShowReportModal(true)}
+                          className="p-3 text-white rounded-full hover:bg-gray-700"
                         >
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={volumeLevel}
-                            onChange={handleVolumeChange}
-                            className="w-24 accent-white"
-                          />
-                        </div>
+                          <FaFlag className="w-5 h-5" />
+                        </button>
                       )}
                     </div>
-                    
-                    {/* Fullscreen Button */}
-                    <button
-                      onClick={toggleFullScreen}
-                      className="p-3 text-white rounded-full hover:bg-gray-700"
-                    >
-                      {isFullScreen ? (
-                        <FaCompress className="w-5 h-5" />
-                      ) : (
-                        <FaExpand className="w-5 h-5" />
-                      )}
-                    </button>
-                    
-                    {/* Report Button */}
-                    <button
-                      onClick={() => setShowReportModal(true)}
-                      className="p-3 text-white rounded-full hover:bg-gray-700"
-                    >
-                      <FaFlag className="w-5 h-5" />
-                    </button>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
-            {/* Session Tips section below the video - simplified version */}
-            <div className="mt-3 bg-gray-900 rounded-lg p-3 shadow-lg">
-              <h3 className="text-white font-medium mb-2 flex items-center">
-                <FaLightbulb className="mr-2 text-amber-400" /> Session Tips
-              </h3>
+            {/* Session Tips section - extremely compact version */}
+            <div className="bg-gray-900 rounded-lg p-2 shadow-lg flex-shrink-0 mt-2">
               <div className="flex justify-between text-xs text-gray-200">
                 <div className="w-1/3 pr-2">
-                  <h4 className="font-medium text-white mb-1">Getting Started</h4>
-                  <ul className="space-y-1 pl-3 list-disc">
-                    <li>Introduce yourself and your learning goals</li>
-                    <li>Discuss what you hope to achieve in this session</li>
-                  </ul>
+                  <h4 className="font-medium text-white text-xs flex items-center">
+                    <FaLightbulb className="mr-1 text-amber-400 text-xs" /> Getting Started
+                  </h4>
+                  <div className="text-xs mt-0.5">Introduce yourself</div>
                 </div>
                 <div className="w-1/3 px-2 border-l border-r border-gray-700">
-                  <h4 className="font-medium text-white mb-1">During Session</h4>
-                  <ul className="space-y-1 pl-3 list-disc">
-                    <li>Use screen sharing to demonstrate techniques</li>
-                    <li>Take notes in the chat for reference later</li>
-                  </ul>
+                  <h4 className="font-medium text-white text-xs">During Session</h4>
+                  <div className="text-xs mt-0.5">Use screen sharing</div>
                 </div>
                 <div className="w-1/3 pl-2">
-                  <h4 className="font-medium text-white mb-1">Wrapping Up</h4>
-                  <ul className="space-y-1 pl-3 list-disc">
-                    <li>Summarize what you've learned</li>
-                    <li>Exchange contact information for follow-ups</li>
-                  </ul>
+                  <h4 className="font-medium text-white text-xs">Wrapping Up</h4>
+                  <div className="text-xs mt-0.5">Summarize learning</div>
                 </div>
               </div>
             </div>
           </div>
           
-          {/* Right sidebar with chat */}
+          {/* Right sidebar with integrated chat */}
           <div className="w-1/4 h-full flex flex-col">
-            {/* Chat component - dynamically sized to match the total height */}
-            <div className="flex-grow h-full bg-gray-900 rounded-lg shadow-lg overflow-hidden">
-              <ChatComponent 
-                messages={messages.map(msg => ({
-                  ...msg,
-                  senderImage: msg.sender === localUserProfile.name ? profilePicture : remoteUserProfile.profileImage
-                }))}
-                newMessage={newMessage}
-                setNewMessage={setNewMessage}
-                sendMessage={sendMessage}
-                currentUser={localUserProfile.name}
-                currentUserImage={profilePicture}
-                remoteUserImage={remoteUserProfile.profileImage}
-              />
+            {/* Integrated Chat component - dynamically sized to match the total height */}
+            <div className="flex-grow h-full bg-gray-900 rounded-lg shadow-lg overflow-hidden flex flex-col">
+              {/* Chat Header */}
+              <div className="bg-black text-white p-3 rounded-t-lg">
+                <h2 className="text-lg font-semibold">Chat</h2>
+              </div>
+              
+              {/* Messages container with flexible height */}
+              <div 
+                ref={messagesContainerRef}
+                className="flex-1 overflow-y-auto p-3 space-y-3 bg-white"
+                style={{
+                  overflowY: 'auto',
+                  overflowX: 'hidden'
+                }}
+              >
+                {messages.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-gray-500 italic">
+                    <div className="text-center">
+                      <p>No messages yet</p>
+                      <p className="text-xs mt-2">Start the conversation by saying hello!</p>
+                    </div>
+                  </div>
+                ) : (
+                  messages.map((message, index) => (
+                    <div 
+                      key={index} 
+                      className={`flex flex-col ${message.sender === localUserProfile.name ? 'items-end' : 'items-start'}`}
+                    >
+                      <div className={`flex items-end gap-2 max-w-full ${message.sender === localUserProfile.name ? 'flex-row-reverse' : 'flex-row'}`}>
+                        <div className="w-8 h-8 rounded-full bg-purple-500 flex-shrink-0 mb-1 overflow-hidden">
+                          <img 
+                            src={message.sender === localUserProfile.name ? (message.senderImage || profilePicture) : (message.senderImage || remoteUserProfile.profileImage)}
+                            alt={message.sender}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.src = '/default-profile.png';
+                              // If the image fails to load, fallback to initials
+                              if (e.currentTarget.parentElement) {
+                                e.currentTarget.style.display = 'none';
+                                e.currentTarget.parentElement.innerHTML += `
+                                  <div class="w-full h-full flex items-center justify-center text-white text-xs font-bold">
+                                    ${message.sender.charAt(0).toUpperCase()}
+                                  </div>
+                                `;
+                              }
+                            }}
+                          />
+                        </div>
+                        
+                        <div 
+                          className={`max-w-[calc(100%-3rem)] rounded-2xl p-3 word-wrap break-words hyphens-auto ${
+                            message.sender === localUserProfile.name
+                              ? 'bg-blue-500 text-white rounded-br-none'
+                              : 'bg-gray-100 text-gray-800 rounded-bl-none'
+                          }`}
+                          style={{ 
+                            wordWrap: 'break-word',
+                            overflowWrap: 'break-word',
+                            hyphens: 'auto'
+                          }}
+                        >
+                          {message.sender !== localUserProfile.name && (
+                            <div className="text-xs font-bold mb-1 text-gray-600">{message.sender}</div>
+                          )}
+                          <p className="break-words whitespace-pre-wrap">{message.text}</p>
+                        </div>
+                      </div>
+                      
+                      <div className={`text-xs mt-1 text-gray-500 ${message.sender === localUserProfile.name ? 'pr-10' : 'pl-10'}`}>
+                        {message.timestamp}
+                      </div>
+                    </div>
+                  ))
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+              
+              {/* Chat input area - natural height */}
+              <div className="p-3 border-t border-gray-200 bg-white flex-shrink-0">
+                <div className="flex rounded-full border border-gray-300 overflow-hidden bg-gray-50 focus-within:ring-2 focus-within:ring-blue-300">
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    className="flex-1 p-3 text-gray-800 bg-transparent outline-none placeholder-gray-500"
+                    placeholder="Type a message..."
+                  />
+                  <button
+                    onClick={sendMessage}
+                    disabled={!newMessage.trim()}
+                    className={`p-3 text-white flex-shrink-0 ${newMessage.trim() ? 'bg-blue-500 hover:bg-blue-600' : 'bg-blue-300'} transition-colors`}
+                  >
+                    <FaPaperPlane />
+                  </button>
+                </div>
+                
+                <div className="text-xs text-gray-500 mt-2 text-center">
+                  Press Enter to send • Messages are deleted once the session ends
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1651,6 +1954,18 @@ function LiveSessionPageContent() {
           closeReportModal={() => setShowReportModal(false)}
         />
       )}
+      
+      {/* Custom CSS for animations */}
+      <style jsx global>{`
+        @keyframes fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        
+        .animate-fade-in {
+          animation: fade-in 0.5s ease-out forwards;
+        }
+      `}</style>
     </div>
   );
 }

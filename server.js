@@ -59,6 +59,45 @@ async function executeQuery(query, values = []) {
   }
 }
 
+// Helper function to check if an ID is a valid database ID
+function isValidDatabaseId(id) {
+  // Database IDs should be numeric or numeric strings
+  if (id === null || id === undefined) return false;
+  
+  // Check if it's a socket ID (has ., -, _ or /)
+  if (typeof id === 'string' && (
+      id.includes('.') || 
+      id.includes('-') || 
+      id.includes('_') ||
+      id.includes('/'))) {
+    return false;
+  }
+  
+  // For numeric check
+  return !isNaN(parseInt(id, 10));
+}
+
+// Helper function to get the database ID for a socket ID
+function getUserDatabaseId(socketId) {
+  // Look up user in all online users to find the database ID
+  for (const [dbId, userData] of Object.entries(onlineUsers)) {
+    if (userData.socketId === socketId) {
+      return dbId;
+    }
+  }
+  
+  // Look up in active queues as fallback
+  for (const category in activeQueues) {
+    const user = activeQueues[category].find(u => u.id === socketId);
+    if (user && user.dbId) {
+      return user.dbId;
+    }
+  }
+  
+  console.warn(`⚠️ Warning: Could not find database ID for socket ID ${socketId}`);
+  return socketId; // Fallback to socket ID if no database ID found
+}
+
 // Save session to database
 async function saveSessionToDatabase(session) {
   try {
@@ -73,22 +112,15 @@ async function saveSessionToDatabase(session) {
       topic: session.topic
     }, null, 2));
     
-    // ⚠️ CRITICAL: Ensure numeric user IDs, not socket IDs ⚠️
-    // If IDs look like socket IDs, dump them for debugging
-    if (session.user1Id && (
-        session.user1Id.includes('.') || 
-        session.user1Id.includes('-') || 
-        session.user1Id.includes('_') ||
-        session.user1Id.includes('/'))) {
-      console.error('⚠️ USER1 ID LOOKS LIKE A SOCKET ID, NOT A DATABASE ID:', session.user1Id);
+    // Ensure the user IDs are valid database IDs
+    if (!isValidDatabaseId(session.user1Id)) {
+      console.error(`⚠️ Invalid user1Id format: ${session.user1Id} - skipping database save`);
+      return;
     }
     
-    if (session.user2Id && (
-        session.user2Id.includes('.') || 
-        session.user2Id.includes('-') || 
-        session.user2Id.includes('_') ||
-        session.user2Id.includes('/'))) {
-      console.error('⚠️ USER2 ID LOOKS LIKE A SOCKET ID, NOT A DATABASE ID:', session.user2Id);
+    if (!isValidDatabaseId(session.user2Id)) {
+      console.error(`⚠️ Invalid user2Id format: ${session.user2Id} - skipping database save`);
+      return;
     }
     
     // Ensure the user IDs are strings
@@ -243,7 +275,6 @@ app.prepare().then(() => {
   const roomUsers = {};
 
   // Socket.IO connection handler
-    // Socket.IO connection handler
   io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
     
@@ -379,27 +410,43 @@ app.prepare().then(() => {
         // Create a match ID
         const matchId = `match-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         
-        // Store the match
+        // Store the match - ENSURE DATABASE IDs ARE INCLUDED
         sessionMatches[matchId] = {
           id: matchId,
-          user1: currentUser,
-          user2: bestMatch,
+          user1: {
+            ...currentUser,
+            // Ensure we have database ID
+            dbId: currentUser.dbId || getUserDatabaseId(currentUser.id)
+          },
+          user2: {
+            ...bestMatch,
+            // Ensure we have database ID
+            dbId: bestMatch.dbId || getUserDatabaseId(bestMatch.id)
+          },
           user1Accepted: false,
           user2Accepted: false,
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 30000) // Expires in 30 seconds
         };
         
+        console.log(`Match created with database IDs: user1=${sessionMatches[matchId].user1.dbId}, user2=${sessionMatches[matchId].user2.dbId}`);
+        
         // Notify both users about the match
         io.to(currentUser.id).emit('match-found', {
           matchId,
-          peer: bestMatch,
+          peer: {
+            ...bestMatch,
+            dbId: bestMatch.dbId || getUserDatabaseId(bestMatch.id) // Include database ID
+          },
           expiresIn: 30 // seconds
         });
         
         io.to(bestMatch.id).emit('match-found', {
           matchId,
-          peer: currentUser,
+          peer: {
+            ...currentUser,
+            dbId: currentUser.dbId || getUserDatabaseId(currentUser.id) // Include database ID
+          },
           expiresIn: 30 // seconds
         });
         
@@ -567,7 +614,7 @@ app.prepare().then(() => {
       const directCallSession = {
         id: roomId,
         user1Id: userId, // Use authenticated user ID, not socket ID
-        user2Id: callerId,
+        user2Id: getUserDatabaseId(callerId),
         user1Name: userName,
         user2Name: onlineUsers[callerId]?.userName || 'User 1',
         startedAt: new Date(),
@@ -575,7 +622,7 @@ app.prepare().then(() => {
         topic: 'Direct Call'
       };
       
-      console.log(`Creating direct call session with user IDs: ${userId} and ${callerId}`);
+      console.log(`Creating direct call session with user IDs: ${userId} and ${getUserDatabaseId(callerId)}`);
       
       // Track session in memory
       activeSessions[roomId] = directCallSession;
@@ -612,10 +659,10 @@ app.prepare().then(() => {
     // Handle user joining queue
     socket.on('join-queue', (userData) => {
       console.log(`User ${userData.name} (${socket.id}) joined queue with interests:`, userData.interests);
-      console.log(`User database ID from client: ${userData.id}`);
+      console.log(`User database ID from client: ${userData.dbId}`);
       
       // Validate database ID
-      if (!userData.id || userData.id === 'undefined' || userData.id === 'null') {
+      if (!userData.dbId || userData.dbId === 'undefined' || userData.dbId === 'null') {
         console.warn(`Warning: User ${userData.name} trying to join queue without valid database ID`);
       }
       
@@ -633,13 +680,13 @@ app.prepare().then(() => {
           ...activeQueues[category][existingUserIndex],
           interests: userData.interests || [],
           skills: userData.skills || [],
-          dbId: userData.id // Save the actual database ID
+          dbId: userData.dbId // Save the actual database ID
         };
       } else {
         // Add user to queue with their matching data
         activeQueues[category].push({
           id: socket.id,  // Socket ID for socket communication
-          dbId: userData.id, // Database ID for DB operations
+          dbId: userData.dbId, // Database ID for DB operations
           name: userData.name,
           interests: userData.interests || [],
           skills: userData.skills || [],
@@ -722,6 +769,10 @@ app.prepare().then(() => {
           // Update only interests and skills, preserve other data
           activeQueues[category][userIndex].interests = userData.interests || [];
           activeQueues[category][userIndex].skills = userData.skills || [];
+          // Make sure database ID is updated
+          if (userData.dbId) {
+            activeQueues[category][userIndex].dbId = userData.dbId;
+          }
           
           console.log(`Updated profile for ${userData.name} (${socket.id}) in category ${category}`);
           
@@ -731,9 +782,9 @@ app.prepare().then(() => {
       }
     });
 
-    // Handle direct call between users
+    // Handle direct calls between users
     socket.on('direct-call', (data) => {
-      const { targetId, callerId } = data;
+      const { targetId, targetDbId, callerId, callerDbId } = data;
       console.log(`User ${socket.id} (${userName}) is calling user ${targetId}`);
       
       // Find caller info
@@ -751,7 +802,7 @@ app.prepare().then(() => {
         // If caller isn't found in any queue, construct minimal info
         callerInfo = {
           id: socket.id,
-          dbId: session?.user?.id, // Include database ID if available
+          dbId: callerDbId || userId, // Include database ID if available
           name: userName,
         };
       }
@@ -768,30 +819,30 @@ app.prepare().then(() => {
       if (!targetInfo) {
         targetInfo = {
           id: targetId,
+          dbId: targetDbId, // Use the provided target database ID
           name: 'Remote User'
         };
       }
       
-// This code should be added to your direct-call handler near line ~800
       // Generate a call ID
       const callId = `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       
       // Ensure we save database IDs, not socket IDs
-      const callerDbId = callerInfo.dbId || userId;
-      const targetDbId = targetInfo.dbId;
+      const callerDbId2 = callerInfo.dbId || userId;
+      const targetDbId2 = targetInfo.dbId || targetDbId;
       
-      console.log(`Direct call setup with database IDs: caller=${callerDbId}, target=${targetDbId}`);
+      console.log(`Direct call setup with database IDs: caller=${callerDbId2}, target=${targetDbId2}`);
       
       // Store a reference to this call
       sessionMatches[callId] = {
         id: callId,
         user1: {
           ...callerInfo,
-          dbId: callerDbId
+          dbId: callerDbId2
         },
         user2: {
           ...targetInfo,
-          dbId: targetDbId
+          dbId: targetDbId2
         },
         user1Accepted: true, // Caller has implicitly accepted
         user2Accepted: false,
@@ -802,7 +853,10 @@ app.prepare().then(() => {
       // Send the call to the target
       io.to(targetId).emit('direct-call', {
         callId,
-        caller: callerInfo
+        caller: {
+          ...callerInfo,
+          dbId: callerDbId2
+        }
       });
       
       // Set a timeout to handle expired calls
@@ -820,7 +874,7 @@ app.prepare().then(() => {
 
     // Handle match responses
     socket.on('match-response', async (data) => {
-      const { matchId, accepted } = data;
+      const { matchId, accepted, userDbId } = data;
       
       if (sessionMatches[matchId]) {
         const match = sessionMatches[matchId];
@@ -829,8 +883,16 @@ app.prepare().then(() => {
           // Mark this user as accepted
           if (match.user1.id === socket.id) {
             match.user1Accepted = true;
+            // Ensure we have the database ID
+            if (userDbId && !match.user1.dbId) {
+              match.user1.dbId = userDbId;
+            }
           } else if (match.user2.id === socket.id) {
             match.user2Accepted = true;
+            // Ensure we have the database ID
+            if (userDbId && !match.user2.dbId) {
+              match.user2.dbId = userDbId;
+            }
           }
           
           // If both accepted, create a session
@@ -838,16 +900,30 @@ app.prepare().then(() => {
             // Generate a room ID for the session
             const roomId = `session-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
             
+            // Get the database IDs from the match object
+            // CRITICAL FIX: Use database IDs (dbId) instead of socket IDs (id)
+            const user1DbId = match.user1.dbId || getUserDatabaseId(match.user1.id);
+            const user2DbId = match.user2.dbId || getUserDatabaseId(match.user2.id);
+            
+            // Log database IDs for debugging
+            console.log(`Creating session with database IDs: user1=${user1DbId}, user2=${user2DbId}`);
+            
             // Notify both users to join the session
             io.to(match.user1.id).emit('session-ready', { 
               roomId, 
-              peer: match.user2,
+              peer: {
+                ...match.user2,
+                dbId: user2DbId // Make sure to pass the database ID to the client
+              },
               matchId 
             });
             
             io.to(match.user2.id).emit('session-ready', { 
               roomId, 
-              peer: match.user1,
+              peer: {
+                ...match.user1,
+                dbId: user1DbId // Make sure to pass the database ID to the client
+              },
               matchId 
             });
             
@@ -855,12 +931,12 @@ app.prepare().then(() => {
             removeFromQueue(match.user1.id);
             removeFromQueue(match.user2.id);
             
-            // Create session object to track and save
+            // Create session object with DATABASE IDs, not socket IDs
             const newSession = {
               id: roomId,
-              user1Id: match.user1.id,
+              user1Id: user1DbId, // Use database ID not socket ID
               user1Name: match.user1.name,
-              user2Id: match.user2.id,
+              user2Id: user2DbId, // Use database ID not socket ID
               user2Name: match.user2.name,
               startedAt: new Date(),
               status: 'ongoing',
@@ -1077,7 +1153,7 @@ app.prepare().then(() => {
       const directCallSession = {
         id: roomId,
         user1Id: callerId,
-        user2Id: calleeId || socket.id,
+        user2Id: calleeId || userId, // Use database ID, not socket ID
         user1Name: onlineUsers[callerId]?.userName || 'User 1',
         user2Name: calleeName || userName,
         startedAt: new Date(),
@@ -1099,7 +1175,7 @@ app.prepare().then(() => {
       io.to(callerSocketId).emit('session_ready', {
         roomId,
         peer: {
-          id: calleeId || socket.id,
+          id: calleeId || userId,
           name: calleeName || userName,
           picture: calleePicture || '/default-profile.png'
         }
