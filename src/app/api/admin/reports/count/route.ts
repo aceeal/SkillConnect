@@ -21,7 +21,9 @@ export async function GET() {
     const countQuery = `
       SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN status = 'reviewed' THEN 1 ELSE 0 END) as reviewed,
+        SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved
       FROM reports
     `;
 
@@ -30,9 +32,13 @@ export async function GET() {
       values: []
     });
 
+    console.log('Report counts:', result[0]);
+
     return NextResponse.json({ 
       total: result[0]?.total || 0,
       pending: result[0]?.pending || 0,
+      reviewed: result[0]?.reviewed || 0,
+      resolved: result[0]?.resolved || 0,
       success: true 
     });
 

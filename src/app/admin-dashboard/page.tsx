@@ -24,7 +24,9 @@ import {
   FiDownload,
   FiClock,
   FiCheck,
-  FiAlertCircle
+  FiAlertCircle,
+  FiInfo,
+  FiList
 } from 'react-icons/fi';
 
 export default function AdminDashboard() {
@@ -36,8 +38,18 @@ export default function AdminDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [reports, setReports] = useState([]);
   const [filteredReports, setFilteredReports] = useState([]);
-  const [reportFilter, setReportFilter] = useState('all');
+  const [reportFilter, setReportFilter] = useState(() => {
+    // Check if we're in a browser environment
+    if (typeof window !== 'undefined') {
+      // Try to get the stored filter from localStorage
+      const savedFilter = localStorage.getItem('adminReportFilter');
+      return savedFilter || 'all'; // Default to 'all' if no saved preference
+    }
+    return 'all'; // Default to 'all' on server-side rendering
+  });
   const [liveSessions, setLiveSessions] = useState([]);
+  const [completedSessions, setCompletedSessions] = useState([]); // New state for completed sessions
+  const [sessionLogFilter, setSessionLogFilter] = useState('all'); // New state for filtering session logs
   const [feedback, setFeedback] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errors, setErrors] = useState({});
@@ -63,6 +75,14 @@ export default function AdminDashboard() {
     }
   }, [status, session, router]);
 
+  // Add this useEffect to save the user's filter preference
+  useEffect(() => {
+    // Save the current filter to localStorage when it changes
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('adminReportFilter', reportFilter);
+    }
+  }, [reportFilter]);
+
   const fetchData = async () => {
     setIsLoading(true);
     setErrors({});
@@ -71,6 +91,7 @@ export default function AdminDashboard() {
         fetchUsers(),
         fetchReports(),
         fetchLiveSessions(),
+        fetchCompletedSessions(), // New function call
         fetchFeedback(),
         fetchStats()
       ]);
@@ -180,7 +201,8 @@ export default function AdminDashboard() {
 
   const fetchLiveSessions = async () => {
     try {
-      const response = await fetch('/api/admin/sessions');
+      // Specifically fetch only ongoing sessions
+      const response = await fetch('/api/admin/sessions?status=ongoing');
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Failed to fetch live sessions: ${response.status}`);
@@ -193,17 +215,95 @@ export default function AdminDashboard() {
         throw new Error('Invalid response format: sessions array not found');
       }
       
-      setLiveSessions(data.sessions);
+      // Filter to ensure we only have ongoing sessions
+      const ongoingSessions = data.sessions.filter(session => session.status === 'ongoing');
+      
+      // Get user profile pictures for each session
+      const sessionsWithUserDetails = await Promise.all(ongoingSessions.map(async (session) => {
+        try {
+          // Fetch user1 details
+          const user1Response = await fetch(`/api/users/${session.user1Id}`);
+          const user1Data = await user1Response.json();
+          
+          // Fetch user2 details
+          const user2Response = await fetch(`/api/users/${session.user2Id}`);
+          const user2Data = await user2Response.json();
+          
+          return {
+            ...session,
+            user1ProfilePicture: user1Data.user?.profilePicture || null,
+            user2ProfilePicture: user2Data.user?.profilePicture || null
+          };
+        } catch (error) {
+          console.error('Error fetching user details for session:', error);
+          return session;
+        }
+      }));
+      
+      setLiveSessions(sessionsWithUserDetails);
       
       setStats(prevStats => ({
         ...prevStats,
-        activeSessions: data.sessions.filter(session => session.status === 'ongoing').length
+        activeSessions: sessionsWithUserDetails.length
       }));
     } catch (error) {
       console.error('Error fetching live sessions:', error);
       setErrors(prev => ({...prev, sessions: error.message}));
       // Don't set any placeholder data
       setLiveSessions([]);
+    }
+  };
+
+  // Function to fetch completed and terminated sessions
+  const fetchCompletedSessions = async () => {
+    try {
+      // Fetch only completed and terminated sessions
+      const response = await fetch('/api/admin/sessions?status=completed,terminated');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Failed to fetch completed sessions: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('Completed sessions data:', data); // Debug log
+      
+      if (!data.sessions || !Array.isArray(data.sessions)) {
+        throw new Error('Invalid response format: completed sessions array not found');
+      }
+      
+      // Filter to make sure we only have completed or terminated sessions
+      const nonOngoingSessions = data.sessions.filter(
+        session => session.status === 'completed' || session.status === 'terminated'
+      );
+      
+      // Get user profile pictures for each completed session
+      const sessionsWithUserDetails = await Promise.all(nonOngoingSessions.map(async (session) => {
+        try {
+          // Fetch user1 details
+          const user1Response = await fetch(`/api/users/${session.user1Id}`);
+          const user1Data = await user1Response.json();
+          
+          // Fetch user2 details
+          const user2Response = await fetch(`/api/users/${session.user2Id}`);
+          const user2Data = await user2Response.json();
+          
+          return {
+            ...session,
+            user1ProfilePicture: user1Data.user?.profilePicture || null,
+            user2ProfilePicture: user2Data.user?.profilePicture || null
+          };
+        } catch (error) {
+          console.error('Error fetching user details for completed session:', error);
+          return session;
+        }
+      }));
+      
+      setCompletedSessions(sessionsWithUserDetails);
+    } catch (error) {
+      console.error('Error fetching completed sessions:', error);
+      setErrors(prev => ({...prev, completedSessions: error.message}));
+      // Don't set any placeholder data
+      setCompletedSessions([]);
     }
   };
 
@@ -281,7 +381,7 @@ export default function AdminDashboard() {
       setStats(prevStats => ({
         ...prevStats,
         newUsersToday,
-        activeSessions: sessionsData.activeSessions || 0,
+        activeSessions: sessionsData.activeSessions || liveSessions.length,
         totalSessionsToday: sessionsData.totalSessions || 0,
         sessionsThisWeek: sessionsData.sessionsThisWeek || 0,
         totalLearningHours: sessionsData.totalLearningHours || 0,
@@ -351,7 +451,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Handle report status update
+  // Handle report status update - Updated version
   const handleUpdateReportStatus = async (reportId, newStatus) => {
     try {
       const response = await fetch('/api/reports', {
@@ -360,31 +460,53 @@ export default function AdminDashboard() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          reportId: reportId,
-          status: newStatus
+          reportId, 
+          status: newStatus,
+          // You can optionally add admin notes here if you implement that feature
+          adminNotes: `Status updated to ${newStatus} on ${new Date().toISOString()}`
         }),
       });
-      
+        
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Failed to update report status: ${response.status}`);
       }
       
-      // Update reports in state
-      setReports(reports.map(report => 
-        report.id === reportId ? { ...report, status: newStatus } : report
-      ));
+      const data = await response.json();
       
-      // Update stats
-      const updatedReports = reports.map(report => 
-        report.id === reportId ? { ...report, status: newStatus } : report
-      );
-      const pendingCount = updatedReports.filter(report => report.status === 'pending').length;
-      setStats(prevStats => ({
-        ...prevStats,
-        pendingReports: pendingCount
-      }));
-      
+      if (data.success) {
+        // Update reports in state
+        const updatedReports = reports.map(report => 
+          report.id === reportId ? { ...report, status: newStatus } : report
+        );
+        setReports(updatedReports);
+        
+        // Update filtered reports based on the current filter
+        if (reportFilter === 'all') {
+          // If showing all reports, update the report in the filtered list too
+          setFilteredReports(updatedReports);
+        } else if (reportFilter === newStatus) {
+          // If filter matches the new status, ensure it shows in the filtered list
+          setFilteredReports(
+            filteredReports.map(report => 
+              report.id === reportId ? { ...report, status: newStatus } : report
+            )
+          );
+        } else {
+          // If filter doesn't match new status, remove from filtered list
+          setFilteredReports(filteredReports.filter(report => report.id !== reportId));
+        }
+        
+        // Update stats for pending reports count
+        const pendingCount = updatedReports.filter(report => report.status === 'pending').length;
+        setStats(prevStats => ({
+          ...prevStats,
+          pendingReports: pendingCount
+        }));
+        
+        // Add a success notification
+        alert(`Report successfully marked as ${newStatus}. To view this report, change the filter to "${newStatus}" or "All Reports".`);
+      }
     } catch (error) {
       console.error('Error updating report status:', error);
       alert('Failed to update report status: ' + error.message);
@@ -470,7 +592,19 @@ export default function AdminDashboard() {
           throw new Error(errorData.error || `Failed to terminate session: ${response.status}`);
         }
         
+        // Remove the terminated session from live sessions
         setLiveSessions(liveSessions.filter(session => session.id !== sessionId));
+        
+        // Update stats for active sessions
+        setStats(prevStats => ({
+          ...prevStats,
+          activeSessions: prevStats.activeSessions - 1
+        }));
+        
+        // Refresh completed sessions to show the newly terminated one
+        fetchCompletedSessions();
+        
+        alert('Session terminated successfully.');
         
       } catch (error) {
         console.error('Error terminating session:', error);
@@ -494,11 +628,11 @@ export default function AdminDashboard() {
     }
   };
   
-  const calculateDuration = (startTimeString) => {
+  const calculateDuration = (startTimeString, endTimeString = null) => {
     try {
       const startTime = new Date(startTimeString);
-      const now = new Date();
-      const diffMs = now - startTime;
+      const endTime = endTimeString ? new Date(endTimeString) : new Date();
+      const diffMs = endTime - startTime;
       
       const hours = Math.floor(diffMs / (1000 * 60 * 60));
       const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -1209,11 +1343,14 @@ export default function AdminDashboard() {
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.3 }}
               >
-                <div className="bg-white rounded-lg shadow-md overflow-hidden">
+                <div className="bg-white rounded-lg shadow-md overflow-hidden mb-4">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
                     <h2 className="text-lg font-bold text-gray-800">Live Sessions</h2>
                     <button 
-                      onClick={fetchLiveSessions}
+                      onClick={() => {
+                        fetchLiveSessions();
+                        fetchCompletedSessions();
+                      }}
                       className="flex items-center px-3 py-1 bg-blue-100 rounded-md text-sm text-blue-700 hover:bg-blue-200"
                     >
                       <FiRefreshCw className="h-4 w-4 mr-1" />
@@ -1253,16 +1390,40 @@ export default function AdminDashboard() {
                             
                             <div className="flex justify-between mb-4">
                               <div className="flex items-center">
-                                <div className="h-8 w-8 rounded-full bg-blue-300 flex items-center justify-center">
-                                  <span className="text-xs font-medium">{(session.user1Name || 'User 1').charAt(0)}</span>
+                                <div className="h-8 w-8 rounded-full bg-blue-300 flex items-center justify-center overflow-hidden">
+                                  {session.user1ProfilePicture ? (
+                                    <img 
+                                      src={session.user1ProfilePicture} 
+                                      alt={session.user1Name || 'User 1'} 
+                                      className="h-8 w-8 object-cover"
+                                      onError={(e) => {
+                                        e.target.src = '/default-profile.png';
+                                        e.target.onerror = null;
+                                      }}
+                                    />
+                                  ) : (
+                                    <span className="text-xs font-medium">{(session.user1Name || 'User 1').charAt(0)}</span>
+                                  )}
                                 </div>
-                                <span className="ml-2 text-sm">{session.user1Name || 'User 1'}</span>
+                                <span className="ml-2 text-sm text-gray-900">{session.user1Name || 'User 1'}</span>
                               </div>
                               <div className="flex items-center">
-                                <div className="h-8 w-8 rounded-full bg-purple-300 flex items-center justify-center">
-                                  <span className="text-xs font-medium">{(session.user2Name || 'User 2').charAt(0)}</span>
+                                <div className="h-8 w-8 rounded-full bg-purple-300 flex items-center justify-center overflow-hidden">
+                                  {session.user2ProfilePicture ? (
+                                    <img 
+                                      src={session.user2ProfilePicture} 
+                                      alt={session.user2Name || 'User 2'} 
+                                      className="h-8 w-8 object-cover"
+                                      onError={(e) => {
+                                        e.target.src = '/default-profile.png';
+                                        e.target.onerror = null;
+                                      }}
+                                    />
+                                  ) : (
+                                    <span className="text-xs font-medium">{(session.user2Name || 'User 2').charAt(0)}</span>
+                                  )}
                                 </div>
-                                <span className="ml-2 text-sm">{session.user2Name || 'User 2'}</span>
+                                <span className="ml-2 text-sm text-gray-900">{session.user2Name || 'User 2'}</span>
                               </div>
                             </div>
                             
@@ -1279,6 +1440,137 @@ export default function AdminDashboard() {
                         ))}
                       </div>
                     )}
+                  </div>
+                </div>
+
+                {/* Session Logs Section */}
+                <div className="bg-white rounded-lg shadow-md overflow-hidden">
+                  <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-gray-800">Session Logs</h2>
+                    <div className="flex space-x-2">
+                      <select
+                        value={sessionLogFilter}
+                        onChange={(e) => setSessionLogFilter(e.target.value)}
+                        className="px-3 py-1 bg-gray-100 rounded-md text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="all">All Sessions</option>
+                        <option value="completed">Completed</option>
+                        <option value="terminated">Terminated</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Session ID
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Participants
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Topic
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Started
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Ended
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Duration
+                          </th>
+                          <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Status
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {completedSessions.length === 0 ? (
+                          <tr>
+                            <td colSpan="7" className="px-6 py-8 text-center text-sm text-gray-500">
+                              {errors.completedSessions ? 
+                                'Error fetching session logs. Please check API connection.' : 
+                                'No completed sessions found.'}
+                            </td>
+                          </tr>
+                        ) : (
+                          completedSessions
+                            .filter(session => sessionLogFilter === 'all' || session.status === sessionLogFilter)
+                            .map((session) => (
+                              <tr key={session.id} className="hover:bg-gray-50">
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                  #{session.id}
+                                </td>
+                                <td className="px-6 py-4">
+                                  <div className="flex items-center space-x-2">
+                                    <div className="flex -space-x-2">
+                                      <div className="h-6 w-6 rounded-full bg-blue-300 flex items-center justify-center overflow-hidden ring-2 ring-white">
+                                        {session.user1ProfilePicture ? (
+                                          <img 
+                                            src={session.user1ProfilePicture} 
+                                            alt={session.user1Name || 'User 1'} 
+                                            className="h-6 w-6 object-cover"
+                                            onError={(e) => {
+                                              e.target.src = '/default-profile.png';
+                                              e.target.onerror = null;
+                                            }}
+                                          />
+                                        ) : (
+                                          <span className="text-xs font-medium">{(session.user1Name || 'User 1').charAt(0)}</span>
+                                        )}
+                                      </div>
+                                      <div className="h-6 w-6 rounded-full bg-purple-300 flex items-center justify-center overflow-hidden ring-2 ring-white">
+                                        {session.user2ProfilePicture ? (
+                                          <img 
+                                            src={session.user2ProfilePicture} 
+                                            alt={session.user2Name || 'User 2'} 
+                                            className="h-6 w-6 object-cover"
+                                            onError={(e) => {
+                                              e.target.src = '/default-profile.png';
+                                              e.target.onerror = null;
+                                            }}
+                                          />
+                                        ) : (
+                                          <span className="text-xs font-medium">{(session.user2Name || 'User 2').charAt(0)}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="text-sm text-gray-900">
+                                      {session.user1Name} & {session.user2Name}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                  {session.topic || 'General'}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  {formatDate(session.startedAt)}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  {formatDate(session.endedAt)}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                  {calculateDuration(session.startedAt, session.endedAt)}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    session.status === 'completed' 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : session.status === 'terminated' 
+                                        ? 'bg-red-100 text-red-800' 
+                                        : 'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {session.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                   
                   <div className="px-6 py-4 border-t border-gray-200">

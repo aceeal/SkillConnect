@@ -83,7 +83,7 @@ export async function POST(request: Request) {
   }
 }
 
-// Optionally add a GET endpoint to fetch reports for admin users
+// GET endpoint to fetch reports for admin users
 export async function GET(request: Request) {
   try {
     // Check authentication
@@ -99,13 +99,47 @@ export async function GET(request: Request) {
     
     // Get URL parameters
     const { searchParams } = new URL(request.url);
-    const status = searchParams.get('status') || 'pending';
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const offset = parseInt(searchParams.get('offset') || '0');
+    const status = searchParams.get('status');
     
-    // Fetch reports with user details
-    const reports = await executeQuery({
-      query: `
+    // Handle pagination parameters safely
+    const limit = parseInt(searchParams.get('limit') || '100', 10); // Increased default limit
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
+    
+    // Log the status parameter to debug
+    console.log('Reports API - Status filter:', status);
+    
+    // Use different query construction approaches based on status
+    let query;
+    let values = [];
+    
+    if (!status || status === 'all') {
+      // Handle 'all' status by not filtering on status
+      query = `
+        SELECT 
+          r.id,
+          r.reported_user_id,
+          r.reported_by_user_id,
+          r.reason,
+          r.status,
+          r.created_at,
+          u1.first_name AS reported_user_first_name,
+          u1.last_name AS reported_user_last_name,
+          u2.first_name AS reporter_first_name,
+          u2.last_name AS reporter_last_name
+        FROM 
+          reports r
+        JOIN 
+          users u1 ON r.reported_user_id = u1.id
+        JOIN 
+          users u2 ON r.reported_by_user_id = u2.id
+        ORDER BY 
+          r.created_at DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      values = []; // No parameters needed for this query
+    } else {
+      // Filter by specific status
+      query = `
         SELECT 
           r.id,
           r.reported_user_id,
@@ -127,10 +161,19 @@ export async function GET(request: Request) {
           r.status = ?
         ORDER BY 
           r.created_at DESC
-        LIMIT ? OFFSET ?
-      `,
-      values: [status, limit, offset]
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+      values = [status];
+    }
+    
+    // Execute query with the appropriate values array
+    const reports = await executeQuery({
+      query,
+      values
     });
+    
+    // Log the count of reports returned
+    console.log(`Reports API - Found ${reports.length} reports`);
     
     return NextResponse.json({ reports });
   } catch (error) {
@@ -142,7 +185,7 @@ export async function GET(request: Request) {
   }
 }
 
-// Add a PATCH endpoint to update report status (for admins)
+// PATCH endpoint to update report status (for admins)
 export async function PATCH(request: Request) {
   try {
     // Check authentication
@@ -175,15 +218,21 @@ export async function PATCH(request: Request) {
       );
     }
     
-    // Update report status
+    // Use parameterized query to prevent SQL injection
+    const updateQuery = `
+      UPDATE reports
+      SET status = ?, 
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `;
+    
     await executeQuery({
-      query: `
-        UPDATE reports
-        SET status = ?, admin_notes = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `,
-      values: [status, adminNotes || null, reportId]
+      query: updateQuery,
+      values: [status, reportId]
     });
+    
+    // Log the update
+    console.log(`Report ${reportId} status updated to ${status} by admin ${session.user.id}`);
     
     return NextResponse.json({
       success: true,
