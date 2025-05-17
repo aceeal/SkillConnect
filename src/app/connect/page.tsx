@@ -33,9 +33,9 @@ export default function ConnectPage() {
   const [matchExpiry, setMatchExpiry] = useState(0);
   const [matchAccepted, setMatchAccepted] = useState(false);
   
-  // Call states
-  const [waitingForMatch, setWaitingForMatch] = useState(false);
-  const [callingUserId, setCallingUserId] = useState<string | null>(null);
+  // Call states - IMPROVED: Store full user data when calling
+  const [callingUser, setCallingUser] = useState<any>(null);
+  const [waitingForResponse, setWaitingForResponse] = useState(false);
   
   // Loading states
   const [loadingQueue, setLoadingQueue] = useState(false);
@@ -213,6 +213,9 @@ export default function ConnectPage() {
       setMatchedUser(data.peer);
       setMatchId(data.matchId);
       setMatchExpiry(data.expiresIn);
+      // Clear calling state if we were calling someone
+      setCallingUser(null);
+      setWaitingForResponse(false);
       // Stop showing other queue users when match is found
       setQueueUsers([]);
       setLoadingQueue(false);
@@ -227,7 +230,8 @@ export default function ConnectPage() {
         setMatchId('');
         setMatchExpiry(0);
         setMatchAccepted(false);
-        setWaitingForMatch(false);
+        setCallingUser(null);
+        setWaitingForResponse(false);
         
         // Request updated queue data
         setLoadingQueue(true);
@@ -242,7 +246,8 @@ export default function ConnectPage() {
       setMatchId('');
       setMatchExpiry(0);
       setMatchAccepted(false);
-      setWaitingForMatch(false);
+      setCallingUser(null);
+      setWaitingForResponse(false);
       
       // Request updated queue data
       setLoadingQueue(true);
@@ -258,7 +263,8 @@ export default function ConnectPage() {
         setMatchId('');
         setMatchExpiry(0);
         setMatchAccepted(false);
-        setWaitingForMatch(false);
+        setCallingUser(null);
+        setWaitingForResponse(false);
         
         // Request updated queue data
         setLoadingQueue(true);
@@ -285,7 +291,8 @@ export default function ConnectPage() {
       setMatchId('');
       setMatchExpiry(0);
       setMatchAccepted(false);
-      setWaitingForMatch(false);
+      setCallingUser(null);
+      setWaitingForResponse(false);
       
       // Request updated queue data
       setLoadingQueue(true);
@@ -299,6 +306,9 @@ export default function ConnectPage() {
       setMatchedUser(data.caller);
       setMatchId(data.callId);
       setMatchExpiry(30);
+      // Clear any calling state
+      setCallingUser(null);
+      setWaitingForResponse(false);
       // Hide other queue users
       setQueueUsers([]);
     });
@@ -307,10 +317,18 @@ export default function ConnectPage() {
       console.log('Direct call response:', data);
       if (data.accepted) {
         // Call accepted, wait for session-ready
-        setWaitingForMatch(true);
+        setWaitingForResponse(true);
+        setMatchFound(true);
+        // Keep the callingUser data as our matchedUser
+        if (callingUser) {
+          setMatchedUser(callingUser);
+        }
       } else {
         // Call declined, return to queue
-        setCallingUserId(null);
+        setCallingUser(null);
+        setWaitingForResponse(false);
+        setMatchFound(false);
+        setMatchedUser(null);
         setLoadingQueue(true);
         socket.emit('request-queue-update');
       }
@@ -456,19 +474,22 @@ export default function ConnectPage() {
     setMatchId('');
     setMatchExpiry(0);
     setMatchAccepted(false);
-    setWaitingForMatch(false);
-    setCallingUserId(null);
+    setCallingUser(null);
+    setWaitingForResponse(false);
     setLoadingQueue(false);
   };
 
-  // Direct call to a specific user in queue
-  const handleCallUser = (userId: string, userDbId: string) => {
+  // IMPROVED: Direct call to a specific user in queue - store full user data
+  const handleCallUser = (user: any) => {
     if (socketRef.current) {
-      setCallingUserId(userId);
+      console.log('Calling user:', user);
+      // Store the user we're calling so we can display their info
+      setCallingUser(user);
+      setWaitingForResponse(true);
       
       socketRef.current.emit('direct-call', { 
-        targetId: userId,
-        targetDbId: userDbId, // Send database ID
+        targetId: user.id,
+        targetDbId: user.dbId, // Send database ID
         callerId: socketRef.current.id,
         callerDbId: session?.user?.id // Send caller's database ID
       });
@@ -485,7 +506,7 @@ export default function ConnectPage() {
         userDbId: session?.user?.id
       });
       setMatchAccepted(true);
-      setWaitingForMatch(true);
+      setWaitingForResponse(true);
     }
   };
 
@@ -499,6 +520,8 @@ export default function ConnectPage() {
       setMatchedUser(null);
       setMatchId('');
       setMatchExpiry(0);
+      setCallingUser(null);
+      setWaitingForResponse(false);
       
       // Request updated queue data
       setLoadingQueue(true);
@@ -520,6 +543,34 @@ export default function ConnectPage() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // IMPROVED: Helper function to get the current user we're interacting with
+  const getCurrentInteractionUser = () => {
+    if (matchFound && matchedUser) {
+      return matchedUser;
+    }
+    if (callingUser && waitingForResponse) {
+      return callingUser;
+    }
+    return null;
+  };
+
+  // IMPROVED: Helper function to get the current interaction status
+  const getInteractionStatus = () => {
+    if (matchFound && !matchAccepted) {
+      return 'match_found';
+    }
+    if (matchFound && matchAccepted && waitingForResponse) {
+      return 'waiting_for_session';
+    }
+    if (callingUser && waitingForResponse) {
+      return 'calling_user';
+    }
+    if (connecting) {
+      return 'connecting';
+    }
+    return 'in_queue';
+  };
+
   if (status === 'loading' || loadingSkills) {
     return (
       <div className="min-h-screen flex items-center justify-center"
@@ -533,6 +584,9 @@ export default function ConnectPage() {
       </div>
     );
   }
+
+  const currentUser = getCurrentInteractionUser();
+  const interactionStatus = getInteractionStatus();
 
   return (
     <div
@@ -719,10 +773,10 @@ export default function ConnectPage() {
               className="text-center mb-6"
             >
               <h1 className="text-3xl font-bold text-black mb-2 font-poppins">
-                {connecting ? 'Connecting to Server...' : 
-                 matchFound ? 'Match Found!' : 
-                 waitingForMatch ? 'Waiting for Response...' :
-                 callingUserId ? 'Calling User...' :
+                {interactionStatus === 'connecting' ? 'Connecting to Server...' : 
+                 interactionStatus === 'match_found' ? 'Match Found!' : 
+                 interactionStatus === 'waiting_for_session' ? 'Preparing Session...' :
+                 interactionStatus === 'calling_user' ? `Calling ${callingUser?.name || 'User'}...` :
                  'Searching for Learning Partners'}
               </h1>
               
@@ -732,7 +786,7 @@ export default function ConnectPage() {
                 </div>
               )}
               
-              {!matchFound && !waitingForMatch && !connectionError && !callingUserId && (
+              {interactionStatus === 'in_queue' && !connectionError && (
                 <>
                   <div className="flex items-center justify-center mb-2">
                     <div className="h-16 w-16 relative">
@@ -745,7 +799,7 @@ export default function ConnectPage() {
                 </>
               )}
               
-              {matchFound && !matchAccepted && (
+              {interactionStatus === 'match_found' && (
                 <div className="mb-2">
                   <div className="flex items-center justify-center mb-3">
                     <motion.div 
@@ -767,7 +821,7 @@ export default function ConnectPage() {
                 </div>
               )}
               
-              {(waitingForMatch || callingUserId) && (
+              {(interactionStatus === 'waiting_for_session' || interactionStatus === 'calling_user') && (
                 <div className="mb-2">
                   <div className="flex items-center justify-center mb-3">
                     <motion.div 
@@ -794,7 +848,9 @@ export default function ConnectPage() {
                     </motion.div>
                   </div>
                   <p className="text-lg mb-1 text-black">
-                    {waitingForMatch ? 'Waiting for your match to respond...' : 'Calling user...'}
+                    {interactionStatus === 'waiting_for_session' ? 'Preparing your learning session...' : 
+                     interactionStatus === 'calling_user' ? `Calling ${callingUser?.name || 'user'}...` : 
+                     'Please wait...'}
                   </p>
                 </div>
               )}
@@ -804,32 +860,34 @@ export default function ConnectPage() {
                   onClick={handleLeaveQueue}
                   className="bg-red-500 text-white px-6 py-2 rounded-lg font-semibold border-2 border-red-500 hover:bg-transparent hover:text-red-500 transition duration-300"
                 >
-                  {matchFound ? 'Cancel Match' : callingUserId ? 'Cancel Call' : 'Leave Queue'}
+                  {interactionStatus === 'match_found' ? 'Cancel Match' : 
+                   interactionStatus === 'calling_user' ? 'Cancel Call' : 
+                   'Leave Queue'}
                 </button>
               </div>
             </motion.div>
 
-            {/* Match info or queue users */}
+            {/* IMPROVED: Match info or queue users with better state management */}
             <motion.div 
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
             >
-              {matchFound && !matchAccepted ? (
-                // Match found UI
+              {/* Show match found UI */}
+              {interactionStatus === 'match_found' && currentUser && (
                 <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
                   <div className="flex items-center mb-4">
                     <div className="w-16 h-16 bg-gray-300 rounded-full overflow-hidden mr-4">
                       <img 
-                        src={matchedUser?.profileImage || '/default-profile.png'} 
-                        alt={matchedUser?.name} 
+                        src={currentUser.profileImage || '/default-profile.png'} 
+                        alt={currentUser.name} 
                         className="w-full h-full object-cover" 
                       />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold text-black">{matchedUser?.name}</h3>
+                      <h3 className="text-xl font-bold text-black">{currentUser.name}</h3>
                       <div className="text-xs text-gray-500">
-                        Database ID: {matchedUser?.dbId || "Not available"}
+                        Database ID: {currentUser.dbId || "Not available"}
                       </div>
                     </div>
                   </div>
@@ -837,22 +895,30 @@ export default function ConnectPage() {
                   <div className="mb-4">
                     <h4 className="font-medium mb-1 text-black">Interests:</h4>
                     <div className="flex flex-wrap gap-2">
-                      {matchedUser?.interests?.map((interest, idx) => (
-                        <span key={idx} className="bg-blue-100 text-blue-800 px-2 py-1 rounded-md text-xs">
-                          {interest}
-                        </span>
-                      ))}
+                      {currentUser.interests?.length > 0 ? (
+                        currentUser.interests.map((interest, idx) => (
+                          <span key={idx} className="bg-blue-100 text-blue-800 px-2 py-1 rounded-md text-xs">
+                            {interest}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-gray-500 text-xs">No interests listed</span>
+                      )}
                     </div>
                   </div>
                   
                   <div className="mb-6">
                     <h4 className="font-medium mb-1 text-black">Skills:</h4>
                     <div className="flex flex-wrap gap-2">
-                      {matchedUser?.skills?.map((skill, idx) => (
-                        <span key={idx} className="bg-green-100 text-green-800 px-2 py-1 rounded-md text-xs">
-                          {skill}
-                        </span>
-                      ))}
+                      {currentUser.skills?.length > 0 ? (
+                        currentUser.skills.map((skill, idx) => (
+                          <span key={idx} className="bg-green-100 text-green-800 px-2 py-1 rounded-md text-xs">
+                            {skill}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-gray-500 text-xs">No skills listed</span>
+                      )}
                     </div>
                   </div>
                   
@@ -871,8 +937,74 @@ export default function ConnectPage() {
                     </button>
                   </div>
                 </div>
-              ) : !matchFound && !waitingForMatch && !callingUserId ? (
-                // Queue users
+              )}
+
+              {/* Show calling user info or waiting for session info */}
+              {(interactionStatus === 'calling_user' || interactionStatus === 'waiting_for_session') && currentUser && (
+                <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
+                  <div className="text-center">
+                    <img 
+                      src={currentUser.profileImage || '/default-profile.png'} 
+                      alt={currentUser.name || 'User'}
+                      className="w-24 h-24 rounded-full mx-auto mb-4 object-cover"
+                    />
+                    <h3 className="text-xl font-bold text-black mb-2">{currentUser.name || 'User'}</h3>
+                    <div className="text-xs text-gray-500 mb-4">
+                      Database ID: {currentUser.dbId || "Not available"}
+                    </div>
+                    
+                    {/* Show interests and skills */}
+                    <div className="mb-4">
+                      <h4 className="font-medium mb-2 text-black">Interests:</h4>
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {currentUser.interests?.length > 0 ? (
+                          currentUser.interests.map((interest, idx) => (
+                            <span key={idx} className="bg-blue-100 text-blue-800 px-2 py-1 rounded-md text-xs">
+                              {interest}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-gray-500 text-xs">No interests listed</span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="mb-4">
+                      <h4 className="font-medium mb-2 text-black">Skills:</h4>
+                      <div className="flex flex-wrap gap-2 justify-center">
+                        {currentUser.skills?.length > 0 ? (
+                          currentUser.skills.map((skill, idx) => (
+                            <span key={idx} className="bg-green-100 text-green-800 px-2 py-1 rounded-md text-xs">
+                              {skill}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-gray-500 text-xs">No skills listed</span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <p className="text-black mb-4">
+                      {interactionStatus === 'calling_user' ? `Calling ${currentUser.name}...` : 
+                       interactionStatus === 'waiting_for_session' ? 'Setting up your session...' : 
+                       'Please wait...'}
+                    </p>
+                    
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
+                      <motion.div 
+                        className="bg-blue-600 h-2.5 rounded-full" 
+                        animate={{ width: ["0%", "100%"] }}
+                        transition={{ duration: 30, ease: "linear" }}
+                      ></motion.div>
+                    </div>
+                    
+                    <p className="text-xs text-black">This may take a moment. You can cancel and return to the queue.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Show queue users when in normal queue state */}
+              {interactionStatus === 'in_queue' && !connectionError && (
                 <>
                   <h2 className="text-2xl font-semibold text-black mb-4">
                     Other Users in Queue
@@ -915,27 +1047,35 @@ export default function ConnectPage() {
                           <div className="mb-3">
                             <p className="text-sm font-medium text-black mb-1">Interested in learning:</p>
                             <div className="flex flex-wrap gap-2">
-                              {user.interests?.map((interest, idx) => (
-                                <span key={idx} className="bg-blue-100 text-blue-800 px-2 py-1 rounded-md text-xs font-medium">
-                                  {interest}
-                                </span>
-                              )) || <span className="text-xs text-black">No interests specified</span>}
+                              {user.interests?.length > 0 ? (
+                                user.interests.map((interest, idx) => (
+                                  <span key={idx} className="bg-blue-100 text-blue-800 px-2 py-1 rounded-md text-xs font-medium">
+                                    {interest}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-xs text-black">No interests specified</span>
+                              )}
                             </div>
                           </div>
                           
                           <div className="mb-3">
                             <p className="text-sm font-medium text-black mb-1">Skills:</p>
                             <div className="flex flex-wrap gap-2">
-                              {user.skills?.map((skill, idx) => (
-                                <span key={idx} className="bg-green-100 text-green-800 px-2 py-1 rounded-md text-xs font-medium">
-                                  {skill}
-                                </span>
-                              )) || <span className="text-xs text-black">No skills specified</span>}
+                              {user.skills?.length > 0 ? (
+                                user.skills.map((skill, idx) => (
+                                  <span key={idx} className="bg-green-100 text-green-800 px-2 py-1 rounded-md text-xs font-medium">
+                                    {skill}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-xs text-black">No skills specified</span>
+                              )}
                             </div>
                           </div>
                           
                           <button
-                            onClick={() => handleCallUser(user.id, user.dbId)}
+                            onClick={() => handleCallUser(user)}
                             className="w-full py-2 bg-blue-500 text-white rounded-lg font-medium border-2 border-blue-500 hover:bg-transparent hover:text-blue-500 transition duration-300"
                           >
                             Call Now
@@ -945,34 +1085,6 @@ export default function ConnectPage() {
                     </div>
                   )}
                 </>
-              ) : (
-                // Waiting for match response or calling user
-                <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
-                  <div className="text-center">
-                    <img 
-                      src={matchedUser?.profileImage || '/default-profile.png'} 
-                      alt={matchedUser?.name || 'User'}
-                      className="w-24 h-24 rounded-full mx-auto mb-4 object-cover"
-                    />
-                    <h3 className="text-xl font-bold text-black mb-2">{matchedUser?.name || 'User'}</h3>
-                    <div className="text-xs text-gray-500 mb-2">
-                      Database ID: {matchedUser?.dbId || "Not available"}
-                    </div>
-                    <p className="text-black mb-4">
-                      {waitingForMatch ? `Waiting for ${matchedUser?.name || 'user'} to respond...` : 'Calling user...'}
-                    </p>
-                    
-                    <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4">
-                      <motion.div 
-                        className="bg-blue-600 h-2.5 rounded-full" 
-                        animate={{ width: ["0%", "100%"] }}
-                        transition={{ duration: 30, ease: "linear" }}
-                      ></motion.div>
-                    </div>
-                    
-                    <p className="text-xs text-black">This may take a moment. You can cancel and return to the queue.</p>
-                  </div>
-                </div>
               )}
             </motion.div>
           </>

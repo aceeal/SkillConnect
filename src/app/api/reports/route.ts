@@ -218,21 +218,38 @@ export async function PATCH(request: Request) {
       );
     }
     
+    // Convert reportId to integer
+    const reportIdNumber = parseInt(reportId, 10);
+    if (isNaN(reportIdNumber)) {
+      return NextResponse.json(
+        { error: 'Invalid report ID' },
+        { status: 400 }
+      );
+    }
+    
     // Use parameterized query to prevent SQL injection
+    // Note: Removed updated_at since it doesn't exist in the database schema
     const updateQuery = `
       UPDATE reports
-      SET status = ?, 
-          updated_at = CURRENT_TIMESTAMP
+      SET status = ?
       WHERE id = ?
     `;
     
-    await executeQuery({
+    const result = await executeQuery({
       query: updateQuery,
-      values: [status, reportId]
+      values: [status, reportIdNumber]
     });
     
+    // Check if any rows were affected
+    if (result.affectedRows === 0) {
+      return NextResponse.json(
+        { error: 'Report not found' },
+        { status: 404 }
+      );
+    }
+    
     // Log the update
-    console.log(`Report ${reportId} status updated to ${status} by admin ${session.user.id}`);
+    console.log(`Report ${reportIdNumber} status updated to ${status} by admin ${session.user.id}`);
     
     return NextResponse.json({
       success: true,

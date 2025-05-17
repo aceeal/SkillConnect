@@ -38,6 +38,12 @@ function LiveSessionPageContent() {
   const [isConnected, setIsConnected] = useState(false);
   const [connectionFailed, setConnectionFailed] = useState(false);
   
+  // Add states for device capabilities
+  const [hasCamera, setHasCamera] = useState(true);
+  const [hasMicrophone, setHasMicrophone] = useState(true);
+  const [cameraError, setCameraError] = useState('');
+  const [micError, setMicError] = useState('');
+  
   // Add a new state for tracking remote user disconnection
   const [remoteUserDisconnected, setRemoteUserDisconnected] = useState(false);
   const [disconnectionReason, setDisconnectionReason] = useState('');
@@ -452,6 +458,103 @@ function LiveSessionPageContent() {
     }
   }, [volumeLevel]);
   
+  // Enhanced function to get user media with graceful fallbacks
+  const getUserMediaGracefully = async () => {
+    let stream = null;
+    let videoTrack = null;
+    let audioTrack = null;
+    
+    // Reset error states
+    setCameraError('');
+    setMicError('');
+    
+    try {
+      // First, try to get both video and audio
+      addLog('Attempting to get both video and audio...');
+      stream = await navigator.mediaDevices.getUserMedia({ 
+        video: true, 
+        audio: true 
+      });
+      
+      videoTrack = stream.getVideoTracks()[0];
+      audioTrack = stream.getAudioTracks()[0];
+      
+      if (videoTrack) {
+        setHasCamera(true);
+        addLog('Camera access granted');
+      }
+      
+      if (audioTrack) {
+        setHasMicrophone(true);
+        addLog('Microphone access granted');
+      }
+      
+      return stream;
+    } catch (error) {
+      addLog(`Failed to get both video and audio: ${error.message}`);
+      
+      // If that fails, try video only
+      try {
+        addLog('Attempting to get video only...');
+        const videoStream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: false 
+        });
+        
+        setHasCamera(true);
+        setHasMicrophone(false);
+        setMicError('Microphone not available or permission denied');
+        addLog('Video-only access granted');
+        
+        // Try to add audio separately
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({ 
+            video: false, 
+            audio: true 
+          });
+          
+          const audioTrack = audioStream.getAudioTracks()[0];
+          if (audioTrack) {
+            videoStream.addTrack(audioTrack);
+            setHasMicrophone(true);
+            setMicError('');
+            addLog('Audio track added successfully');
+          }
+        } catch (audioError) {
+          addLog(`Could not get audio: ${audioError.message}`);
+          setMicError(`Audio not available: ${audioError.message}`);
+        }
+        
+        return videoStream;
+      } catch (videoError) {
+        addLog(`Failed to get video: ${videoError.message}`);
+        setCameraError(`Camera not available: ${videoError.message}`);
+        setHasCamera(false);
+        
+        // If video fails, try audio only
+        try {
+          addLog('Attempting to get audio only...');
+          const audioStream = await navigator.mediaDevices.getUserMedia({ 
+            video: false, 
+            audio: true 
+          });
+          
+          setHasMicrophone(true);
+          addLog('Audio-only access granted');
+          return audioStream;
+        } catch (audioError) {
+          addLog(`Failed to get audio: ${audioError.message}`);
+          setMicError(`Audio not available: ${audioError.message}`);
+          setHasMicrophone(false);
+          
+          // If everything fails, create a dummy stream
+          addLog('Creating dummy stream - no camera or microphone available');
+          return new MediaStream();
+        }
+      }
+    }
+  };
+  
   // Main WebRTC setup - wait for settings to be loaded first
   useEffect(() => {
     if (status !== 'authenticated' || !session?.user || !settingsLoaded) {
@@ -600,90 +703,62 @@ function LiveSessionPageContent() {
     // Function to initialize WebRTC and get media
     async function startWebRTC() {
       try {
-        // Get user media based on settings
-        addLog('Requesting media...');
-        
-        // Request media with constraints based on settings
-        const mediaConstraints = {
-          video: true,  // Always request video, we'll enable/disable it after
-          audio: true   // Always request audio, we'll enable/disable it after
-        };
-        
-        addLog(`Requesting media with constraints: ${JSON.stringify(mediaConstraints)}`);
-        const stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+        // Get user media with graceful fallbacks
+        addLog('Requesting media with graceful fallbacks...');
+        const stream = await getUserMediaGracefully();
         
         // Save reference to stream
         localStreamRef.current = stream;
         
-        addLog('Media access granted');
+        addLog('Media setup completed');
+        addLog(`Has camera: ${hasCamera}, Has microphone: ${hasMicrophone}`);
         
-        // Apply initial states based on settings
-        addLog(`Applying initial states - Camera: ${isCameraOn ? 'ON' : 'OFF'}, Mic: ${isMicOn ? 'ON' : 'OFF'}`);
-        
-        // Handle microphone initial state - CRITICAL PART
-        const audioTrack = stream.getAudioTracks()[0];
-        if (audioTrack) {
-          // This is what actually mutes the microphone at hardware level
-          audioTrack.enabled = isMicOn;
-          addLog(`Set initial microphone hardware state to: ${isMicOn ? 'ENABLED' : 'DISABLED'}`);
+        // Apply initial states based on settings and device capabilities
+        if (stream && stream.getAudioTracks().length > 0) {
+          const audioTrack = stream.getAudioTracks()[0];
+          // Only enable mic if user setting is on AND we have microphone
+          audioTrack.enabled = isMicOn && hasMicrophone;
+          addLog(`Set initial microphone state to: ${audioTrack.enabled ? 'ENABLED' : 'DISABLED'}`);
         }
         
-        // Handle camera initial state - CRITICAL PART
-        if (!isCameraOn) {
-          // If camera should be off initially, turn it off immediately
-          addLog('Setting initial camera state to OFF');
+        // Handle camera initial state
+        if (!isCameraOn || !hasCamera) {
+          // If camera should be off initially OR we don't have a camera
+          addLog('Setting initial camera state to OFF (user preference or no camera)');
           
-          // Process to turn off camera completely (not just disable)
+          // If we have video tracks, stop them and replace with black canvas
           const videoTracks = stream.getVideoTracks();
           if (videoTracks.length > 0) {
             const videoTrack = videoTracks[0];
-            
-            // Actually stop the camera track - IMPORTANT
             videoTrack.stop();
-            addLog('Stopped video track hardware');
-            
-            // Remove it from the stream
             stream.removeTrack(videoTrack);
-            
-            // Create a black canvas track for replacement
-            const blackCanvas = document.createElement('canvas');
-            blackCanvas.width = 640;
-            blackCanvas.height = 480;
-            const ctx = blackCanvas.getContext('2d');
-            ctx.fillStyle = 'black';
-            ctx.fillRect(0, 0, blackCanvas.width, blackCanvas.height);
-            
-            // Create black track
-            const blackStream = blackCanvas.captureStream();
-            const blackTrack = blackStream.getVideoTracks()[0];
-            
-            // Update local display
-            if (localVideoRef.current) {
-              const tempStream = new MediaStream();
-              tempStream.addTrack(blackTrack);
-              localVideoRef.current.srcObject = tempStream;
-              addLog('Applied black canvas to local video');
-              
-              try {
-                await localVideoRef.current.play();
-                addLog('Local video (black canvas) playing');
-              } catch (e) {
-                addLog(`Local video play failed: ${e.message}`);
-              }
-            }
           }
-        } else {
-          // Set local video stream if camera is enabled
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = stream;
-            try {
-              await localVideoRef.current.play();
-              addLog('Local video playing');
-            } catch (e) {
-              addLog(`Local video play failed: ${e.message}`);
-            }
-          } else {
-            addLog('Local video ref not available');
+          
+          // Create a black canvas track for replacement
+          const blackCanvas = document.createElement('canvas');
+          blackCanvas.width = 640;
+          blackCanvas.height = 480;
+          const ctx = blackCanvas.getContext('2d');
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, blackCanvas.width, blackCanvas.height);
+          
+          // Create black track
+          const blackStream = blackCanvas.captureStream();
+          const blackTrack = blackStream.getVideoTracks()[0];
+          stream.addTrack(blackTrack);
+          
+          // Update UI state
+          setIsCameraOn(false);
+        }
+        
+        // Set local video stream
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+          try {
+            await localVideoRef.current.play();
+            addLog('Local video playing');
+          } catch (e) {
+            addLog(`Local video play failed: ${e.message}`);
           }
         }
         
@@ -698,38 +773,11 @@ function LiveSessionPageContent() {
         peerConnectionRef.current = peerConnection;
         addLog('Created peer connection');
         
-        // Add tracks to peer connection based on settings
-        if (isCameraOn) {
-          // Add all tracks if camera is on
-          stream.getTracks().forEach(track => {
-            peerConnection.addTrack(track, stream);
-            addLog(`Added ${track.kind} track to peer connection`);
-          });
-        } else {
-          // If camera is off initially, we need special handling
-          
-          // First, add any audio tracks
-          const audioTracks = stream.getAudioTracks();
-          if (audioTracks.length > 0) {
-            peerConnection.addTrack(audioTracks[0], stream);
-            addLog('Added audio track to peer connection');
-          }
-          
-          // Create a black video track for the peer connection
-          const blackCanvas = document.createElement('canvas');
-          blackCanvas.width = 640;
-          blackCanvas.height = 480;
-          const ctx = blackCanvas.getContext('2d');
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, blackCanvas.width, blackCanvas.height);
-          
-          const blackStream = blackCanvas.captureStream();
-          const blackTrack = blackStream.getVideoTracks()[0];
-          
-          // Add the black track to the peer connection
-          peerConnection.addTrack(blackTrack, blackStream);
-          addLog('Added black video track to peer connection to indicate camera off');
-        }
+        // Add tracks to peer connection
+        stream.getTracks().forEach(track => {
+          peerConnection.addTrack(track, stream);
+          addLog(`Added ${track.kind} track to peer connection`);
+        });
         
         // Set up ICE candidate handling
         peerConnection.onicecandidate = (event) => {
@@ -987,8 +1035,13 @@ function LiveSessionPageContent() {
     return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
   
-  // Media control functions
+  // Enhanced media control functions
   const toggleCamera = async () => {
+    if (!hasCamera) {
+      addLog('Cannot toggle camera - no camera detected');
+      return;
+    }
+    
     try {
       if (isCameraOn) {
         // TURN CAMERA OFF
@@ -1099,6 +1152,7 @@ function LiveSessionPageContent() {
         } catch (error) {
           addLog(`Error turning on camera: ${error.message}`);
           console.error('Camera restart error:', error);
+          setCameraError(`Failed to access camera: ${error.message}`);
         }
       }
     } catch (error) {
@@ -1108,6 +1162,11 @@ function LiveSessionPageContent() {
   };
   
   const toggleMic = () => {
+    if (!hasMicrophone) {
+      addLog('Cannot toggle microphone - no microphone detected');
+      return;
+    }
+    
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       if (audioTrack) {
@@ -1419,8 +1478,46 @@ function LiveSessionPageContent() {
       }}
       ref={pageContainerRef}
     >
+      {/* Custom CSS for better chat scrollbar and animations */}
+      <style jsx global>{`
+        /* Custom scrollbar for chat */
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #f1f1f1;
+          border-radius: 4px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #c1c1c1;
+          border-radius: 4px;
+          transition: background-color 0.2s ease;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #a8a8a8;
+        }
+        
+        /* Firefox scrollbar */
+        .custom-scrollbar {
+          scrollbar-width: thin;
+          scrollbar-color: #c1c1c1 #f1f1f1;
+        }
+        
+        @keyframes fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        
+        .animate-fade-in {
+          animation: fade-in 0.5s ease-out forwards;
+        }
+      `}</style>
+
       <div className="flex-grow container mx-auto px-6 flex flex-col py-2 h-full overflow-hidden">
-        {/* Profile Header - ALWAYS VISIBLE with placeholder when not connected */}
+        {/* Profile Header with device capability indicators */}
         <div className="bg-gray-900 rounded-lg p-3 mb-3 shadow-lg flex-shrink-0">
           <div className="flex items-center justify-between">
             {/* Local user profile summary */}
@@ -1456,6 +1553,29 @@ function LiveSessionPageContent() {
                   {localUserProfile.skills.length > 2 && (
                     <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">
                       +{localUserProfile.skills.length - 2}
+                    </span>
+                  )}
+                </div>
+                {/* Device capability indicators */}
+                <div className="flex space-x-1 mt-1">
+                  {!hasCamera && (
+                    <span className="text-xs bg-red-600 text-white px-1 py-0.5 rounded-full">
+                      No Camera
+                    </span>
+                  )}
+                  {!hasMicrophone && (
+                    <span className="text-xs bg-red-600 text-white px-1 py-0.5 rounded-full">
+                      No Mic
+                    </span>
+                  )}
+                  {cameraError && (
+                    <span className="text-xs bg-yellow-600 text-white px-1 py-0.5 rounded-full" title={cameraError}>
+                      Cam Error
+                    </span>
+                  )}
+                  {micError && (
+                    <span className="text-xs bg-yellow-600 text-white px-1 py-0.5 rounded-full" title={micError}>
+                      Mic Error
                     </span>
                   )}
                 </div>
@@ -1521,7 +1641,6 @@ function LiveSessionPageContent() {
         
         {/* Main content area with video and sidebar */}
         <div className="flex flex-1 gap-3 overflow-hidden min-h-0" ref={videoContainerRef}>
-          {/* Video Section (Left) with 16:9 aspect ratio */}
           {/* Video Section (Left) with flex layout to push Session Tips to bottom */}
           <div className="w-3/4 flex flex-col h-full overflow-hidden justify-between">
             {/* Video container with forced 16:9 aspect ratio */}
@@ -1578,6 +1697,13 @@ function LiveSessionPageContent() {
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-80 text-white">
                     <div className="w-16 h-16 border-t-4 border-blue-500 border-solid rounded-full animate-spin mb-4"></div>
                     <div className="text-xl font-medium">Connecting to {remoteUserProfile.name}...</div>
+                    <div className="text-sm mt-2 text-gray-300">
+                      {!hasCamera && !hasMicrophone ? 
+                        'Connecting with audio-only mode' : 
+                        !hasCamera ? 
+                          'Connecting without camera' : 
+                          'Setting up audio and video'}
+                    </div>
                   </div>
                 )}
                 
@@ -1585,6 +1711,9 @@ function LiveSessionPageContent() {
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-80 text-white">
                     <div className="text-red-500 text-6xl mb-4">⚠️</div>
                     <div className="text-xl font-medium">Connection failed</div>
+                    <div className="text-sm mt-2 text-gray-300 max-w-md text-center">
+                      Unable to establish connection. This might be due to network issues or browser permissions.
+                    </div>
                     <button 
                       onClick={() => router.push('/connect')}
                       className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
@@ -1594,7 +1723,7 @@ function LiveSessionPageContent() {
                   </div>
                 )}
                 
-                {/* NEW: Remote user disconnection overlay */}
+                {/* Remote user disconnection overlay */}
                 {remoteUserDisconnected && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-90 text-white animate-fade-in">
                     <div className="text-yellow-500 text-6xl mb-6">
@@ -1648,14 +1777,17 @@ function LiveSessionPageContent() {
                     {/* User badge in top-left corner of PiP */}
                     <div className="absolute top-1 left-1 flex items-center bg-black bg-opacity-50 rounded px-1 z-10">
                       <span className="text-white text-xs">{localUserProfile.name}</span>
-                      {isMicOn ? 
+                      {hasMicrophone && isMicOn ? 
                         <FaMicrophone className="text-green-500 w-2 h-2 ml-1" /> : 
                         <FaMicrophoneSlash className="text-red-500 w-2 h-2 ml-1" />
                       }
+                      {!hasCamera && (
+                        <FaVideoSlash className="text-red-500 w-2 h-2 ml-1" />
+                      )}
                     </div>
                     
                     {/* Camera off indicator with profile picture */}
-                    {!isCameraOn && !isScreenSharing && (
+                    {(!isCameraOn || !hasCamera) && !isScreenSharing && (
                       <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900">
                         <div className="w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center overflow-hidden border-2 border-blue-400">
                           {profilePicture ? (
@@ -1674,6 +1806,9 @@ function LiveSessionPageContent() {
                             </div>
                           )}
                         </div>
+                        {!hasCamera && (
+                          <div className="mt-1 text-xs text-white">No Camera</div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1693,17 +1828,20 @@ function LiveSessionPageContent() {
                       {/* Only show media controls if connected */}
                       {isConnected && (
                         <>
-                          {/* Camera Control */}
+                          {/* Camera Control - disabled if no camera */}
                           <button
                             onClick={toggleCamera}
-                            disabled={isScreenSharing}
+                            disabled={isScreenSharing || !hasCamera}
                             className={`p-3 rounded-full ${
-                              isScreenSharing 
-                                ? 'text-gray-400 cursor-not-allowed' 
-                                : isCameraOn 
-                                  ? 'text-white hover:bg-gray-700' 
-                                  : 'bg-red-500 text-white hover:bg-red-600'
+                              !hasCamera
+                                ? 'text-gray-500 cursor-not-allowed'
+                                : isScreenSharing 
+                                  ? 'text-gray-400 cursor-not-allowed' 
+                                  : isCameraOn 
+                                    ? 'text-white hover:bg-gray-700' 
+                                    : 'bg-red-500 text-white hover:bg-red-600'
                             }`}
+                            title={!hasCamera ? 'No camera detected' : isScreenSharing ? 'Camera disabled during screen share' : (isCameraOn ? 'Turn off camera' : 'Turn on camera')}
                           >
                             {isCameraOn ? (
                               <FaVideo className="w-5 h-5" />
@@ -1712,14 +1850,18 @@ function LiveSessionPageContent() {
                             )}
                           </button>
                           
-                          {/* Microphone Control */}
+                          {/* Microphone Control - disabled if no microphone */}
                           <button
                             onClick={toggleMic}
+                            disabled={!hasMicrophone}
                             className={`p-3 rounded-full ${
-                              isMicOn 
-                                ? 'text-white hover:bg-gray-700' 
-                                : 'bg-red-500 text-white hover:bg-red-600'
+                              !hasMicrophone
+                                ? 'text-gray-500 cursor-not-allowed'
+                                : isMicOn 
+                                  ? 'text-white hover:bg-gray-700' 
+                                  : 'bg-red-500 text-white hover:bg-red-600'
                             }`}
+                            title={!hasMicrophone ? 'No microphone detected' : (isMicOn ? 'Mute microphone' : 'Unmute microphone')}
                           >
                             {isMicOn ? (
                               <FaMicrophone className="w-5 h-5" />
@@ -1837,17 +1979,17 @@ function LiveSessionPageContent() {
           
           {/* Right sidebar with integrated chat */}
           <div className="w-1/4 h-full flex flex-col">
-            {/* Integrated Chat component - dynamically sized to match the total height */}
+            {/* Integrated Chat component with custom scrollbar */}
             <div className="flex-grow h-full bg-gray-900 rounded-lg shadow-lg overflow-hidden flex flex-col">
               {/* Chat Header */}
-              <div className="bg-black text-white p-3 rounded-t-lg">
+              <div className="bg-gray-900 text-white p-3 rounded-t-lg">
                 <h2 className="text-lg font-semibold">Chat</h2>
               </div>
               
-              {/* Messages container with flexible height */}
+              {/* Messages container with custom scrollbar */}
               <div 
                 ref={messagesContainerRef}
-                className="flex-1 overflow-y-auto p-3 space-y-3 bg-white"
+                className="flex-1 overflow-y-auto p-3 space-y-3 bg-white custom-scrollbar"
                 style={{
                   overflowY: 'auto',
                   overflowX: 'hidden'
@@ -1915,7 +2057,7 @@ function LiveSessionPageContent() {
                 <div ref={messagesEndRef} />
               </div>
               
-              {/* Chat input area - natural height */}
+              {/* Chat input area */}
               <div className="p-3 border-t border-gray-200 bg-white flex-shrink-0">
                 <div className="flex rounded-full border border-gray-300 overflow-hidden bg-gray-50 focus-within:ring-2 focus-within:ring-blue-300">
                   <input
@@ -1954,18 +2096,6 @@ function LiveSessionPageContent() {
           closeReportModal={() => setShowReportModal(false)}
         />
       )}
-      
-      {/* Custom CSS for animations */}
-      <style jsx global>{`
-        @keyframes fade-in {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        
-        .animate-fade-in {
-          animation: fade-in 0.5s ease-out forwards;
-        }
-      `}</style>
     </div>
   );
 }

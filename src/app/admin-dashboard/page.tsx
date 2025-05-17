@@ -118,14 +118,16 @@ export default function AdminDashboard() {
       
       const formattedUsers = data.users.map(user => ({
         id: user.id.toString(),
-        firstName: user.name?.split(' ')[0] || '',
-        lastName: user.name?.split(' ').slice(1).join(' ') || '',
+        // Handle both possible naming conventions
+        firstName: user.first_name || user.firstName || user.name?.split(' ')[0] || '',
+        lastName: user.last_name || user.lastName || user.name?.split(' ').slice(1).join(' ') || '',
         email: user.email || '',
-        profilePicture: user.profilePicture || null,
+        profilePicture: user.profile_picture || user.profilePicture || null,
         role: user.role || 'user',
         status: user.status || 'active',
-        createdAt: user.createdAt || new Date().toISOString(),
-        lastLogin: user.lastActive || new Date().toISOString(),
+        // Fix the date mapping - handle both snake_case and camelCase
+        createdAt: user.created_at || user.createdAt || new Date().toISOString(),
+        lastLogin: user.last_login || user.lastLogin || user.lastActive || null,
         skills: user.skills || [],
         interests: user.interests || []
       }));
@@ -149,7 +151,7 @@ export default function AdminDashboard() {
 
   const fetchReports = async () => {
     try {
-      // Fetch reports with all statuses
+      // Fetch reports using the correct endpoint
       const response = await fetch('/api/reports');
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -164,18 +166,17 @@ export default function AdminDashboard() {
       }
       
       // Map the reports data to match the expected structure
-      // Adjust field names to match your actual API response structure
+      // Handle both possible naming conventions
       const formattedReports = data.reports.map(report => ({
         id: report.id.toString(),
-        reportedUserId: report.reported_user_id.toString(),
-        reportedUserName: `${report.reported_user_first_name || ''} ${report.reported_user_last_name || ''}`.trim() || 'Unknown User',
-        reportedByUserId: report.reported_by_user_id.toString(),
-        reportedByUserName: `${report.reporter_first_name || ''} ${report.reporter_last_name || ''}`.trim() || 'Unknown User',
+        reportedUserId: (report.reported_user_id || report.reportedUserId).toString(),
+        reportedUserName: `${report.reported_user_first_name || report.reportedUserFirstName || ''} ${report.reported_user_last_name || report.reportedUserLastName || ''}`.trim() || 'Unknown User',
+        reportedByUserId: (report.reported_by_user_id || report.reportedByUserId).toString(),
+        reportedByUserName: `${report.reporter_first_name || report.reporterFirstName || ''} ${report.reporter_last_name || report.reporterLastName || ''}`.trim() || 'Unknown User',
         reason: report.reason || 'No reason provided',
-        // No admin_notes field in your database schema
-        details: '', 
+        details: report.details || report.admin_notes || report.adminNotes || '', 
         status: report.status || 'pending',
-        createdAt: report.created_at
+        createdAt: report.created_at || report.createdAt || new Date().toISOString()
       }));
       
       console.log('Formatted reports:', formattedReports); // Debug log
@@ -231,8 +232,8 @@ export default function AdminDashboard() {
           
           return {
             ...session,
-            user1ProfilePicture: user1Data.user?.profilePicture || null,
-            user2ProfilePicture: user2Data.user?.profilePicture || null
+            user1ProfilePicture: user1Data.user?.profilePicture || user1Data.user?.profile_picture || null,
+            user2ProfilePicture: user2Data.user?.profilePicture || user2Data.user?.profile_picture || null
           };
         } catch (error) {
           console.error('Error fetching user details for session:', error);
@@ -258,7 +259,7 @@ export default function AdminDashboard() {
   const fetchCompletedSessions = async () => {
     try {
       // Fetch only completed and terminated sessions
-      const response = await fetch('/api/admin/sessions?status=completed,terminated');
+      const response = await fetch('/api/admin/sessions?status=completed,terminated,disconnected');
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || `Failed to fetch completed sessions: ${response.status}`);
@@ -271,9 +272,9 @@ export default function AdminDashboard() {
         throw new Error('Invalid response format: completed sessions array not found');
       }
       
-      // Filter to make sure we only have completed or terminated sessions
+      // Filter to make sure we only have completed, terminated, or disconnected sessions
       const nonOngoingSessions = data.sessions.filter(
-        session => session.status === 'completed' || session.status === 'terminated'
+        session => ['completed', 'terminated', 'disconnected'].includes(session.status)
       );
       
       // Get user profile pictures for each completed session
@@ -289,8 +290,8 @@ export default function AdminDashboard() {
           
           return {
             ...session,
-            user1ProfilePicture: user1Data.user?.profilePicture || null,
-            user2ProfilePicture: user2Data.user?.profilePicture || null
+            user1ProfilePicture: user1Data.user?.profilePicture || user1Data.user?.profile_picture || null,
+            user2ProfilePicture: user2Data.user?.profilePicture || user2Data.user?.profile_picture || null
           };
         } catch (error) {
           console.error('Error fetching user details for completed session:', error);
@@ -327,7 +328,7 @@ export default function AdminDashboard() {
         userId: submission.user_id?.toString() || 'guest',
         userName: submission.name || 'Anonymous',
         message: submission.message,
-        createdAt: submission.created_at || new Date().toISOString()
+        createdAt: submission.created_at || submission.createdAt || new Date().toISOString()
       }));
       
       setFeedback(formattedFeedback);
@@ -370,9 +371,9 @@ export default function AdminDashboard() {
       }
       
       // Calculate new users today from actual data
+      const today = new Date();
       const newUsersToday = users.filter(user => {
         const createdDate = new Date(user.createdAt);
-        const today = new Date();
         return createdDate.getDate() === today.getDate() &&
                createdDate.getMonth() === today.getMonth() &&
                createdDate.getFullYear() === today.getFullYear();
@@ -451,7 +452,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Handle report status update - Updated version
+  // Fixed report status update - using the correct endpoint
   const handleUpdateReportStatus = async (reportId, newStatus) => {
     try {
       const response = await fetch('/api/reports', {
@@ -462,7 +463,6 @@ export default function AdminDashboard() {
         body: JSON.stringify({ 
           reportId, 
           status: newStatus,
-          // You can optionally add admin notes here if you implement that feature
           adminNotes: `Status updated to ${newStatus} on ${new Date().toISOString()}`
         }),
       });
@@ -556,7 +556,7 @@ export default function AdminDashboard() {
           user.email,
           user.status,
           new Date(user.createdAt).toLocaleString(),
-          new Date(user.lastLogin).toLocaleString()
+          user.lastLogin ? new Date(user.lastLogin).toLocaleString() : 'Never'
         ].join(','))
       ].join('\n');
       
@@ -615,7 +615,9 @@ export default function AdminDashboard() {
 
   const formatDate = (dateString) => {
     try {
+      if (!dateString) return 'Not available';
       const date = new Date(dateString);
+      if (isNaN(date.getTime())) return 'Invalid date';
       return date.toLocaleDateString('en-US', { 
         year: 'numeric', 
         month: 'short', 
@@ -633,6 +635,8 @@ export default function AdminDashboard() {
       const startTime = new Date(startTimeString);
       const endTime = endTimeString ? new Date(endTimeString) : new Date();
       const diffMs = endTime - startTime;
+      
+      if (diffMs < 0) return '00:00:00';
       
       const hours = Math.floor(diffMs / (1000 * 60 * 60));
       const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
@@ -1163,7 +1167,7 @@ export default function AdminDashboard() {
                                 {formatDate(user.createdAt)}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-1/6">
-                                {formatDate(user.lastLogin)}
+                                {user.lastLogin ? formatDate(user.lastLogin) : 'Never'}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium w-20">
                                 <div className="flex justify-end space-x-1">
