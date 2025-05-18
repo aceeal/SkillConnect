@@ -27,7 +27,8 @@ import {
   FiInfo,
   FiList,
   FiChevronLeft,
-  FiChevronRight
+  FiChevronRight,
+  FiMail
 } from 'react-icons/fi';
 
 export default function AdminDashboard() {
@@ -52,6 +53,8 @@ export default function AdminDashboard() {
   const [completedSessions, setCompletedSessions] = useState([]); // New state for completed sessions
   const [sessionLogFilter, setSessionLogFilter] = useState('all'); // New state for filtering session logs
   const [feedback, setFeedback] = useState([]);
+  const [filteredFeedback, setFilteredFeedback] = useState([]);
+  const [feedbackFilter, setFeedbackFilter] = useState('all'); // New state for filtering feedback
   const [isLoading, setIsLoading] = useState(true);
   const [errors, setErrors] = useState({});
   
@@ -62,6 +65,10 @@ export default function AdminDashboard() {
   // Pagination states for user lists
   const [currentUserPage, setCurrentUserPage] = useState(1);
   const [usersPerPage] = useState(10); // You can make this adjustable if needed
+  
+  // Pagination states for feedback
+  const [currentFeedbackPage, setCurrentFeedbackPage] = useState(1);
+  const [feedbackPerPage] = useState(10);
   
   const [stats, setStats] = useState({
     totalUsers: 0,
@@ -339,18 +346,22 @@ export default function AdminDashboard() {
       
       const formattedFeedback = data.submissions.map(submission => ({
         id: submission.id.toString(),
-        userId: submission.user_id?.toString() || 'guest',
-        userName: submission.name || 'Anonymous',
-        message: submission.message,
-        createdAt: submission.created_at || submission.createdAt || new Date().toISOString()
+        name: submission.name || 'Anonymous',
+        email: submission.email || '',
+        message: submission.message || '',
+        isBugReport: Boolean(submission.is_bug_report),
+        status: submission.status || 'new',
+        createdAt: submission.created_at || new Date().toISOString()
       }));
       
       setFeedback(formattedFeedback);
+      setFilteredFeedback(formattedFeedback);
     } catch (error) {
       console.error('Error fetching feedback:', error);
       setErrors(prev => ({...prev, feedback: error.message}));
       // Don't set any placeholder data
       setFeedback([]);
+      setFilteredFeedback([]);
     }
   };
 
@@ -416,6 +427,19 @@ export default function AdminDashboard() {
       setFilteredReports(reports.filter(report => report.status === reportFilter));
     }
   }, [reports, reportFilter]);
+
+  // Filter feedback based on status and type
+  useEffect(() => {
+    if (feedbackFilter === 'all') {
+      setFilteredFeedback(feedback);
+    } else if (feedbackFilter === 'bug_reports') {
+      setFilteredFeedback(feedback.filter(item => item.isBugReport));
+    } else if (feedbackFilter === 'general') {
+      setFilteredFeedback(feedback.filter(item => !item.isBugReport));
+    } else {
+      setFilteredFeedback(feedback.filter(item => item.status === feedbackFilter));
+    }
+  }, [feedback, feedbackFilter]);
 
   const handleSearch = (event) => {
     const term = event.target.value;
@@ -688,6 +712,29 @@ export default function AdminDashboard() {
     setCurrentUserPage(pageNumber);
   };
 
+  // Pagination logic for feedback
+  const getPaginatedFeedback = () => {
+    const startIndex = (currentFeedbackPage - 1) * feedbackPerPage;
+    const endIndex = startIndex + feedbackPerPage;
+    return filteredFeedback.slice(startIndex, endIndex);
+  };
+
+  const getTotalFeedbackPages = () => {
+    return Math.ceil(filteredFeedback.length / feedbackPerPage);
+  };
+
+  const handleFeedbackPrevePage = () => {
+    setCurrentFeedbackPage(prev => Math.max(prev - 1, 1));
+  };
+
+  const handleFeedbackNextPage = () => {
+    setCurrentFeedbackPage(prev => Math.min(prev + 1, getTotalFeedbackPages()));
+  };
+
+  const handleFeedbackPageClick = (pageNumber) => {
+    setCurrentFeedbackPage(pageNumber);
+  };
+
   // Reset to page 1 when filter changes
   useEffect(() => {
     setCurrentPage(1);
@@ -697,6 +744,11 @@ export default function AdminDashboard() {
   useEffect(() => {
     setCurrentUserPage(1);
   }, [users]);
+
+  // Reset to page 1 when feedback filter changes
+  useEffect(() => {
+    setCurrentFeedbackPage(1);
+  }, [feedbackFilter]);
 
   if (isLoading) {
     return (
@@ -825,6 +877,11 @@ export default function AdminDashboard() {
                     >
                       <FiMessageSquare className="mr-3 h-5 w-5" />
                       Feedback
+                      {feedback.filter(item => item.status === 'new').length > 0 && (
+                        <span className="ml-auto bg-green-500 text-white px-2 py-0.5 rounded-full text-xs">
+                          {feedback.filter(item => item.status === 'new').length}
+                        </span>
+                      )}
                     </button>
                   </li>
                 </ul>
@@ -1063,7 +1120,7 @@ export default function AdminDashboard() {
                         </div>
                         <div className="ml-3">
                           <p className="text-sm text-gray-800">
-                            <span className="font-medium">New feedback received</span> from {feedback[0].userName}
+                            <span className="font-medium">New feedback received</span> from {feedback[0].name}
                           </p>
                           <p className="text-xs text-gray-500">{formatDate(feedback[0].createdAt)}</p>
                         </div>
@@ -1781,52 +1838,218 @@ export default function AdminDashboard() {
               >
                 <div className="bg-white rounded-lg shadow-md overflow-hidden">
                   <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-                    <h2 className="text-lg font-bold text-gray-800">User Feedback</h2>
-                    <button 
-                      onClick={fetchFeedback}
-                      className="flex items-center px-3 py-1 bg-blue-100 rounded-md text-sm text-blue-700 hover:bg-blue-200"
-                    >
-                      <FiRefreshCw className="h-4 w-4 mr-1" />
-                      Refresh
-                    </button>
-                  </div>
-                  
-                  <div className="overflow-y-auto max-h-96">
-                    <ul className="divide-y divide-gray-200">
-                      {feedback.length === 0 ? (
-                        <li className="p-6 text-center text-gray-500">
-                          {errors.feedback ? 'Error fetching feedback. Please check API connection.' : 'No feedback submissions yet.'}
-                        </li>
-                      ) : (
-                        feedback.map((item) => (
-                          <li key={item.id} className="p-6 hover:bg-gray-50">
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex items-center">
-                                <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                                  <span className="text-gray-500 font-semibold">
-                                    {item.userName.charAt(0)}
-                                  </span>
-                                </div>
-                                <div className="ml-3">
-                                  <div className="text-sm font-medium text-gray-900">{item.userName}</div>
-                                  <div className="text-xs text-gray-500">{formatDate(item.createdAt)}</div>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mt-2 text-sm text-gray-700">{item.message}</div>
-                          </li>
-                        ))
-                      )}
-                    </ul>
-                  </div>
-                  
-                  {feedback.length > 0 && (
-                    <div className="px-6 py-4 border-t border-gray-200 text-center">
-                      <button className="inline-flex items-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                        Load More Feedback
+                    <h2 className="text-lg font-bold text-gray-800">User Feedback & Bug Reports</h2>
+                    <div className="flex space-x-2">
+                      <select
+                        value={feedbackFilter}
+                        onChange={(e) => setFeedbackFilter(e.target.value)}
+                        className="px-3 py-1 bg-gray-100 rounded-md text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="all">All Feedback</option>
+                        <option value="bug_reports">Bug Reports</option>
+                        <option value="general">General Feedback</option>
+                        <option value="new">New</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="resolved">Resolved</option>
+                      </select>
+                      <button 
+                        onClick={fetchFeedback}
+                        className="flex items-center px-3 py-1 bg-blue-100 rounded-md text-sm text-blue-700 hover:bg-blue-200"
+                      >
+                        <FiRefreshCw className="h-4 w-4 mr-1" />
+                        Refresh
                       </button>
                     </div>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    {filteredFeedback.length === 0 ? (
+                      <div className="text-center py-8">
+                        <FiMessageSquare className="mx-auto h-12 w-12 text-gray-400" />
+                        <h3 className="mt-2 text-sm font-medium text-gray-900">No feedback found</h3>
+                        <p className="mt-1 text-sm text-gray-500">
+                          {errors.feedback ? 'Error fetching feedback. Please check API connection.' : 
+                          feedbackFilter === 'all' ? 'No feedback submissions yet.' : `No ${feedbackFilter.replace('_', ' ')} feedback found.`}
+                        </p>
+                      </div>
+                    ) : (
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Type
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Submitter
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Message
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Status
+                            </th>
+                            <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                              Date
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {getPaginatedFeedback().map((item) => (
+                            <tr key={item.id} className={item.isBugReport ? 'bg-red-50' : 'hover:bg-gray-50'}>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  {item.isBugReport ? (
+                                    <div className="flex items-center">
+                                      <FiAlertTriangle className="h-5 w-5 text-red-500 mr-2" />
+                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                        Bug Report
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center">
+                                      <FiMail className="h-5 w-5 text-blue-500 mr-2" />
+                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                        Feedback
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <div className="flex items-center">
+                                  <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
+                                    <span className="text-gray-500 font-semibold text-sm">
+                                      {item.name.charAt(0).toUpperCase()}
+                                    </span>
+                                  </div>
+                                  <div className="ml-3">
+                                    <div className="text-sm font-medium text-gray-900">{item.name}</div>
+                                    <div className="text-xs text-gray-500">{item.email}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="text-sm text-gray-900 max-w-md">
+                                  {item.message.length > 100 ? (
+                                    <div>
+                                      {item.message.substring(0, 100)}...
+                                      <button 
+                                        className="text-blue-600 hover:text-blue-800 ml-1"
+                                        onClick={() => alert(item.message)}
+                                      >
+                                        Read more
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    item.message
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                  item.status === 'new' 
+                                    ? 'bg-yellow-100 text-yellow-800' 
+                                    : item.status === 'in_progress' 
+                                      ? 'bg-blue-100 text-blue-800' 
+                                      : 'bg-green-100 text-green-800'
+                                }`}>
+                                  {item.status === 'new' ? 'New' : 
+                                   item.status === 'in_progress' ? 'In Progress' : 
+                                   'Resolved'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {formatDate(item.createdAt)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  
+                  {/* Pagination Controls for Feedback */}
+                  {filteredFeedback.length > 0 && getTotalFeedbackPages() > 1 && (
+                    <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-700">
+                          Showing {Math.min((currentFeedbackPage - 1) * feedbackPerPage + 1, filteredFeedback.length)} to{' '}
+                          {Math.min(currentFeedbackPage * feedbackPerPage, filteredFeedback.length)} of{' '}
+                          {filteredFeedback.length} results
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <button
+                          onClick={handleFeedbackPrevePage}
+                          disabled={currentFeedbackPage === 1}
+                          className={`p-2 rounded-md text-sm font-medium ${
+                            currentFeedbackPage === 1
+                              ? 'text-gray-400 cursor-not-allowed'
+                              : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          <FiChevronLeft className="h-4 w-4" />
+                        </button>
+                        
+                        {/* Page numbers */}
+                        {Array.from({ length: Math.min(5, getTotalFeedbackPages()) }, (_, i) => {
+                          const startPage = Math.max(1, currentFeedbackPage - 2);
+                          const pageNumber = startPage + i;
+                          
+                          if (pageNumber > getTotalFeedbackPages()) return null;
+                          
+                          return (
+                            <button
+                              key={pageNumber}
+                              onClick={() => handleFeedbackPageClick(pageNumber)}
+                              className={`px-3 py-1 rounded-md text-sm font-medium ${
+                                currentFeedbackPage === pageNumber
+                                  ? 'bg-blue-500 text-white'
+                                  : 'text-gray-700 hover:bg-gray-100'
+                              }`}
+                            >
+                              {pageNumber}
+                            </button>
+                          );
+                        })}
+                        
+                        <button
+                          onClick={handleFeedbackNextPage}
+                          disabled={currentFeedbackPage === getTotalFeedbackPages()}
+                          className={`p-2 rounded-md text-sm font-medium ${
+                            currentFeedbackPage === getTotalFeedbackPages()
+                              ? 'text-gray-400 cursor-not-allowed'
+                              : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          <FiChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
                   )}
+                  
+                  {/* Feedback Statistics */}
+                  <div className="px-6 py-4 border-t border-gray-200">
+                    <h3 className="text-sm font-medium text-gray-700 mb-3">Feedback Statistics</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                      <div className="bg-gray-50 p-3 rounded-md">
+                        <div className="text-sm text-gray-500">Total Feedback</div>
+                        <div className="text-xl font-bold mt-1 text-blue-500">{feedback.length}</div>
+                      </div>
+                      <div className="bg-gray-50 p-3 rounded-md">
+                        <div className="text-sm text-gray-500">Bug Reports</div>
+                        <div className="text-xl font-bold mt-1 text-red-500">{feedback.filter(item => item.isBugReport).length}</div>
+                      </div>
+                      <div className="bg-gray-50 p-3 rounded-md">
+                        <div className="text-sm text-gray-500">New Submissions</div>
+                        <div className="text-xl font-bold mt-1 text-yellow-500">{feedback.filter(item => item.status === 'new').length}</div>
+                      </div>
+                      <div className="bg-gray-50 p-3 rounded-md">
+                        <div className="text-sm text-gray-500">Resolved</div>
+                        <div className="text-xl font-bold mt-1 text-green-500">{feedback.filter(item => item.status === 'resolved').length}</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </motion.div>
             )}
