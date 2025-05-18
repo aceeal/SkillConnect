@@ -232,6 +232,7 @@ export function GlobalCallHandler() {
         userId={session.user.id}
         userName={session.user.name || 'Anonymous User'}
         userPicture={session.user.image || '/default-profile.png'}
+        isConnected={isConnected}
       />
     </>
   );

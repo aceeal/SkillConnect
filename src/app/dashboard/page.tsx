@@ -218,11 +218,11 @@ export default function DashboardPage() {
       const sortedUsers = sortUsersWithFavoritesOnTop(data.users || []);
       setFilteredUsers(sortedUsers);
       
-      // Update user stats
+      // Update user stats - FIXED: using onlineStatus instead of status
       setStats(prev => ({
         ...prev,
         totalUsers: data.users.length,
-        onlineUsers: data.users.filter(user => user.status === 'online').length,
+        onlineUsers: data.users.filter(user => user.onlineStatus === 'online').length,
       }));
       
     } catch (error) {
@@ -243,8 +243,9 @@ export default function DashboardPage() {
       if (!aIsFavorite && bIsFavorite) return 1;
       
       // If both have the same favorite status, then sort by online status
-      if (a.status === 'online' && b.status !== 'online') return -1;
-      if (a.status !== 'online' && b.status === 'online') return 1;
+      // FIXED: using onlineStatus instead of status
+      if (a.onlineStatus === 'online' && b.onlineStatus !== 'online') return -1;
+      if (a.onlineStatus !== 'online' && b.onlineStatus === 'online') return 1;
       
       // If still tied, sort alphabetically by name
       return a.name.localeCompare(b.name);
@@ -255,11 +256,11 @@ export default function DashboardPage() {
   useEffect(() => {
     let filtered = [...users];
     
-    // Apply filter
+    // Apply filter - FIXED: using onlineStatus instead of status
     if (activeFilter === 'online') {
-      filtered = filtered.filter(user => user.status === 'online');
+      filtered = filtered.filter(user => user.onlineStatus === 'online');
     } else if (activeFilter === 'offline') {
-      filtered = filtered.filter(user => user.status !== 'online');
+      filtered = filtered.filter(user => user.onlineStatus !== 'online');
     } else if (activeFilter === 'favorites') {
       filtered = filtered.filter(user => favorites.includes(user.id));
     }
@@ -302,35 +303,40 @@ export default function DashboardPage() {
     const socket = getGlobalSocket();
     
     if (!socket || !socket.connected) {
-      alert('Unable to make calls at this time. Please try again later.');
+      alert('Unable to make calls at this time. Please check your connection and try again later.');
       return;
     }
     
-    const checkAndInitiateCall = () => {
-      if (typeof window !== 'undefined' && window.initiateCallReady && window.initiateCall) {
+    // Enhanced check for call system readiness
+    const checkAndInitiateCall = (retryCount = 0) => {
+      // First check if the global function exists
+      if (typeof window !== 'undefined' && window.initiateCall) {
         try {
+          console.log('Attempting to initiate call to:', userId, userName);
           const success = window.initiateCall(userId.toString(), userName, userImage);
           if (!success) {
-            alert('Unable to start call. Please try again.');
+            alert('Unable to start call. The user might be offline or busy.');
           }
+          return;
         } catch (error) {
           console.error('Error starting call:', error);
           alert('Error starting call: ' + error.message);
+          return;
         }
+      }
+      
+      // If function doesn't exist, check if we should retry
+      if (retryCount < 5) { // Increased retry count
+        console.log(`Call system not ready, retrying... (${retryCount + 1}/5)`);
+        setTimeout(() => {
+          checkAndInitiateCall(retryCount + 1);
+        }, (retryCount + 1) * 300); // Progressive delays: 300ms, 600ms, 900ms, etc.
       } else {
-        if (retryCount < 3) {
-          // Retry a few times with increasing delays
-          setTimeout(() => {
-            retryCount++;
-            checkAndInitiateCall();
-          }, retryCount * 500); // 500ms, 1000ms, 1500ms delays
-        } else {
-          alert('Call system is not ready. Please try again later.');
-        }
+        console.error('Call system failed to initialize after multiple attempts');
+        alert('Call system is not ready. Please refresh the page and try again.');
       }
     };
     
-    let retryCount = 0;
     checkAndInitiateCall();
   };
 
@@ -358,7 +364,7 @@ export default function DashboardPage() {
           id: String(userId),
           name: user.name,
           profilePicture: user.profilePicture || '/default-profile.png',
-          status: user.status === 'online' ? 'online' : 'offline'
+          status: user.onlineStatus === 'online' ? 'online' : 'offline' // FIXED: using onlineStatus
         }));
         
         // Dispatch a custom event that the chat component can listen for
@@ -617,8 +623,9 @@ export default function DashboardPage() {
                               e.currentTarget.src = '/default-profile.png';
                             }}
                           />
+                          {/* FIXED: using onlineStatus instead of status */}
                           <span className={`absolute bottom-0 right-0 block h-3 w-3 rounded-full ring-2 ring-white ${
-                            user.status === 'online' ? 'bg-green-400' : 'bg-gray-300'
+                            user.onlineStatus === 'online' ? 'bg-green-400' : 'bg-gray-300'
                           }`}></span>
                         </div>
                         <div className="ml-4">
@@ -630,12 +637,13 @@ export default function DashboardPage() {
                                 Favorite
                               </span>
                             )}
+                            {/* FIXED: using onlineStatus instead of status */}
                             <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              user.status === 'online' 
+                              user.onlineStatus === 'online' 
                                 ? 'bg-green-100 text-green-800'
                                 : 'bg-gray-100 text-gray-800'
                             }`}>
-                              {user.status}
+                              {user.onlineStatus}
                             </span>
                           </div>
                           <p className="text-xs text-gray-500 mt-1">
@@ -647,12 +655,12 @@ export default function DashboardPage() {
                         <button
                           onClick={() => handleStartCall(user.id, user.name, user.profilePicture)}
                           className={`inline-flex items-center p-2 border shadow-sm text-sm leading-4 font-medium rounded-md ${
-                            user.status === 'online' 
+                            user.onlineStatus === 'online' // FIXED: using onlineStatus instead of status
                               ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' 
                               : 'border-gray-300 text-gray-400 cursor-not-allowed'
                           }`}
                           title="Start video call"
-                          disabled={user.status !== 'online'}
+                          disabled={user.onlineStatus !== 'online'} // FIXED: using onlineStatus instead of status
                         >
                           <FiVideo className="h-4 w-4" />
                         </button>
