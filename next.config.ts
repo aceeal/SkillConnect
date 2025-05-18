@@ -1,4 +1,4 @@
-// /next.config.js
+// /next.config.js - Updated with Cloudinary support
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
@@ -7,6 +7,7 @@ const nextConfig = {
       'encrypted-tbn0.gstatic.com',
       'static.vecteezy.com',
       'wallpapers.com',
+      'res.cloudinary.com', // Add Cloudinary domain
     ],
     remotePatterns: [
       {
@@ -24,6 +25,11 @@ const nextConfig = {
       {
         protocol: 'http',
         hostname: 'localhost',
+      },
+      // Add Cloudinary pattern specifically
+      {
+        protocol: 'https',
+        hostname: 'res.cloudinary.com',
       },
       // Allow any HTTPS domain for profile pictures
       {
@@ -47,7 +53,6 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  // Additional build skips
   experimental: {
     typedRoutes: false,
   },

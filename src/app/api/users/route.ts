@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const filter = searchParams.get('filter') || 'all';
     const search = searchParams.get('search') || '';
     
-    // Define the online threshold (15 minutes)
+    // Define the online threshold (15 minutes) - keeping your original logic
     const onlineThreshold = new Date();
     onlineThreshold.setMinutes(onlineThreshold.getMinutes() - 15);
     
@@ -103,7 +103,7 @@ export async function GET(request: Request) {
     // Execute query
     const result = await executeQuery({ query, values });
     
-    // Process the results
+    // Process the results - keeping your exact format but mapping online_status to status
     const users = Array.isArray(result) ? result.map(user => ({
       id: user.id,
       name: `${user.first_name} ${user.last_name}`,
@@ -113,13 +113,13 @@ export async function GET(request: Request) {
       profilePicture: user.profile_picture,
       profile_picture: user.profile_picture, // For compatibility
       role: user.role,
-      status: 'active', // Default status - you might want to add this to your database
+      status: user.online_status, // Map online_status to status for dashboard compatibility
       created_at: user.created_at,
       createdAt: user.created_at, // For compatibility
       last_login: user.last_login,
       lastLogin: user.last_login, // For compatibility
       lastActive: user.last_login ? new Date(user.last_login).toISOString() : null,
-      online_status: user.online_status,
+      online_status: user.online_status, // Keep original field too
       skills: user.skill ? user.skill.split('|') : [],
       interests: user.interest ? user.interest.split('|') : [],
     })) : [];

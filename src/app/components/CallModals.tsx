@@ -1,7 +1,7 @@
 // src/app/components/CallModals.tsx
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { FaPhone, FaPhoneSlash, FaUser, FaVolumeUp } from 'react-icons/fa';
@@ -38,21 +38,35 @@ interface CallModalsProps {
   userId: number | string;
   userName: string;
   userPicture?: string;
+  isConnected?: boolean;
 }
 
 const CallModals: React.FC<CallModalsProps> = ({ 
   socket, 
   userId, 
   userName,
-  userPicture = '/default-profile.png'
+  userPicture = '/default-profile.png',
+  isConnected = false
 }) => {
   const router = useRouter();
   const [callState, setCallState] = useState<CallState>(initialCallState);
-  const [timer, setTimer] = useState<number>(30); // 30 seconds countdown
+  const [timer, setTimer] = useState<number>(30);
   const [timerId, setTimerId] = useState<NodeJS.Timeout | null>(null);
   const [portalElement, setPortalElement] = useState<HTMLElement | null>(null);
   const [callDuration, setCallDuration] = useState<string>('00:00');
   const [functionReady, setFunctionReady] = useState<boolean>(false);
+  const [lastCallAttempt, setLastCallAttempt] = useState<number>(0);
+  const socketRef = useRef(socket);
+  const callStateRef = useRef(callState);
+  
+  // Update refs when props change
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
+  
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
   
   // Find or create portal container
   useEffect(() => {
@@ -80,6 +94,7 @@ const CallModals: React.FC<CallModalsProps> = ({
     }
     setTimer(30);
     setCallDuration('00:00');
+    stopRingtone();
   };
 
   // Format timer as mm:ss
@@ -93,21 +108,17 @@ const CallModals: React.FC<CallModalsProps> = ({
   useEffect(() => {
     if (!socket) return;
 
-    // Handle incoming call
     const handleIncomingCall = (data: any) => {
       console.log('Incoming call:', data);
       
-      // Play a sound to alert the user
-      try {
-        const audio = new Audio('/sounds/ringtone.mp3'); // Make sure to add a ringtone sound
-        audio.loop = true;
-        audio.play().catch(e => console.log('Audio play error:', e));
-        
-        // Store the audio element to stop it later
-        (window as any).callRingtone = audio;
-      } catch (e) {
-        console.log('Error playing ringtone:', e);
+      // Prevent call while another call is active
+      if (callStateRef.current.isIncoming || callStateRef.current.isOutgoing) {
+        console.log('Incoming call ignored - already in a call');
+        return;
       }
+      
+      // Play ringtone
+      playRingtone('/sounds/ringtone.mp3', true);
       
       setCallState({
         isIncoming: true,
@@ -121,54 +132,50 @@ const CallModals: React.FC<CallModalsProps> = ({
         calleePicture: userPicture,
       });
       
-      // Start the timer for auto-decline
       startCallTimer();
     };
 
-    // Handle call accepted
     const handleCallAccepted = (data: any) => {
       console.log('Call accepted:', data);
-      if (callState.isOutgoing && data.callId === callState.callId) {
-        // Stop any playing ringtone
+      if (callStateRef.current.isOutgoing && data.callId === callStateRef.current.callId) {
         stopRingtone();
-        // Start call duration timer
         startCallDurationTimer();
-        // Will redirect to session in handleSessionReady
       }
     };
 
-    // Handle call declined
     const handleCallDeclined = (data: any) => {
       console.log('Call declined:', data);
-      
-      // Stop any playing ringtone
       stopRingtone();
       
-      if (callState.isOutgoing && data.callId === callState.callId) {
+      if ((callStateRef.current.isOutgoing && data.callId === callStateRef.current.callId) ||
+          (callStateRef.current.isIncoming && data.callId === callStateRef.current.callId)) {
         resetCallState();
-        
-        // Show a nicer notification instead of an alert
-        showNotification('Call ended', 'The call was declined or not answered');
+        showNotification('Call ended', data.message || 'The call was declined or not answered');
       }
     };
 
-    // Handle session ready (redirect to live session)
     const handleSessionReady = (data: any) => {
       console.log('Session ready:', data);
-      
-      // Stop any playing ringtone
       stopRingtone();
-      
-      // Reset call state
       resetCallState();
       
-      // Create the URL with all needed parameters
-      const sessionUrl = `/live-session?roomId=${data.roomId}&peerId=${data.peer.id}&peerName=${encodeURIComponent(data.peer.name)}`;
+      // Build session URL with peer database ID if available
+      let sessionUrl = `/live-session?roomId=${data.roomId}&peerId=${data.peer.id}&peerName=${encodeURIComponent(data.peer.name)}`;
       
-      // We need a slight delay to ensure both users are ready
+      // Add database ID if available (for user profile viewing and reporting)
+      if (data.peer.dbId) {
+        sessionUrl += `&peerDbId=${data.peer.dbId}`;
+      }
+      
       setTimeout(() => {
         router.push(sessionUrl);
       }, 500);
+    };
+
+    // User status events
+    const handleUserStatusChanged = (data: any) => {
+      // This helps track if users go offline during call attempts
+      console.log(`User ${data.userId} status changed to ${data.status}`);
     };
 
     // Register event listeners
@@ -176,6 +183,7 @@ const CallModals: React.FC<CallModalsProps> = ({
     socket.on('call_accepted', handleCallAccepted);
     socket.on('call_declined', handleCallDeclined);
     socket.on('session_ready', handleSessionReady);
+    socket.on('user_status_changed', handleUserStatusChanged);
 
     // Cleanup on unmount
     return () => {
@@ -183,13 +191,36 @@ const CallModals: React.FC<CallModalsProps> = ({
       socket.off('call_accepted', handleCallAccepted);
       socket.off('call_declined', handleCallDeclined);
       socket.off('session_ready', handleSessionReady);
-      
-      // Stop any playing ringtone
-      stopRingtone();
+      socket.off('user_status_changed', handleUserStatusChanged);
     };
-  }, [socket, userId, userName, callState, router, userPicture]);
+  }, [socket, userId, userName, router, userPicture]);
 
-  // Helper to stop ringtone
+  // Enhanced ringtone functions
+  const playRingtone = (src: string, loop: boolean = false) => {
+    try {
+      stopRingtone(); // Stop any existing ringtone
+      
+      const audio = new Audio(src);
+      audio.loop = loop;
+      audio.volume = 0.7; // Set reasonable volume
+      
+      // Try to play, with fallback for user interaction requirements
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(e => {
+          console.log('Audio play blocked by browser policy:', e);
+          // Show visual notification if audio is blocked
+          showNotification('Call Alert', 'Please enable sound for call notifications');
+        });
+      }
+      
+      // Store reference for cleanup
+      (window as any).callRingtone = audio;
+    } catch (e) {
+      console.log('Error playing ringtone:', e);
+    }
+  };
+
   const stopRingtone = () => {
     try {
       if ((window as any).callRingtone) {
@@ -202,46 +233,72 @@ const CallModals: React.FC<CallModalsProps> = ({
     }
   };
 
-  // Show notification
-  const showNotification = (title: string, message: string) => {
-    // Create notification element
+  // Enhanced notification system
+  const showNotification = (title: string, message: string, type: 'info' | 'error' | 'success' = 'info') => {
     if (typeof document !== 'undefined') {
+      // Remove any existing notifications
+      const existingNotifications = document.querySelectorAll('.call-notification');
+      existingNotifications.forEach(notification => {
+        document.body.removeChild(notification);
+      });
+      
       const notificationContainer = document.createElement('div');
-      notificationContainer.className = 'fixed top-5 right-5 bg-white p-4 rounded-lg shadow-lg z-50 animate-fade-in';
-      notificationContainer.style.animation = 'fadeIn 0.3s ease-in-out, fadeOut 0.3s ease-in-out 2.7s';
-      notificationContainer.style.color = 'black';
+      notificationContainer.className = `call-notification fixed top-5 right-5 bg-white p-4 rounded-lg shadow-lg z-50 max-w-sm border-l-4 ${
+        type === 'error' ? 'border-red-500' : 
+        type === 'success' ? 'border-green-500' : 
+        'border-blue-500'
+      }`;
+      notificationContainer.style.animation = 'slideInRight 0.3s ease-out, slideOutRight 0.3s ease-in 4.7s';
+      
+      const iconColor = type === 'error' ? 'text-red-500' : 
+                       type === 'success' ? 'text-green-500' : 
+                       'text-blue-500';
       
       notificationContainer.innerHTML = `
-        <div class="flex items-center">
-          <div class="mr-3 text-red-500"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg></div>
-          <div>
-            <div class="font-semibold" style="color: black;">${title}</div>
-            <div class="text-sm" style="color: black;">${message}</div>
+        <div class="flex items-start">
+          <div class="mr-3 ${iconColor}">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+              ${type === 'error' ? 
+                '<path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.25 16.518l-1.732 1.732L12 14.732 8.482 18.25l-1.732-1.732L10.268 12 6.75 8.482l1.732-1.732L12 10.268l3.518-3.518 1.732 1.732L13.732 12l3.518 3.518z"/>' :
+                type === 'success' ?
+                '<path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm-1.25 17.75l-4.5-4.5 1.775-1.775L10.75 14.2l6.225-6.225 1.775 1.775-8 8z"/>' :
+                '<path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm1.25 17.75h-2.5V15.25h2.5v2.5zm0-4.5h-2.5V6.75h2.5v6.5z"/>'
+              }
+            </svg>
           </div>
+          <div class="flex-1">
+            <div class="font-semibold text-gray-900">${title}</div>
+            <div class="text-sm text-gray-600 mt-1">${message}</div>
+          </div>
+          <button class="ml-2 text-gray-400 hover:text-gray-600" onclick="this.parentElement.parentElement.remove()">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+              <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z"/>
+            </svg>
+          </button>
         </div>
       `;
       
       document.body.appendChild(notificationContainer);
       
-      // Remove after 3 seconds
+      // Auto-remove after 5 seconds
       setTimeout(() => {
         if (document.body.contains(notificationContainer)) {
           document.body.removeChild(notificationContainer);
         }
-      }, 3000);
+      }, 5000);
       
-      // Add these styles to the document
+      // Add styles if not already present
       if (!document.getElementById('notification-styles')) {
         const styleElement = document.createElement('style');
         styleElement.id = 'notification-styles';
         styleElement.innerHTML = `
-          @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-20px); }
-            to { opacity: 1; transform: translateY(0); }
+          @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
           }
-          @keyframes fadeOut {
-            from { opacity: 1; transform: translateY(0); }
-            to { opacity: 0; transform: translateY(-20px); }
+          @keyframes slideOutRight {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
           }
         `;
         document.head.appendChild(styleElement);
@@ -258,10 +315,9 @@ const CallModals: React.FC<CallModalsProps> = ({
       setTimer(prev => {
         if (prev <= 1) {
           clearInterval(id);
-          // Auto decline if timer reaches 0
-          if (callState.isIncoming) {
+          if (callStateRef.current.isIncoming) {
             handleDeclineCall();
-          } else if (callState.isOutgoing) {
+          } else if (callStateRef.current.isOutgoing) {
             handleCancelCall();
           }
           return 0;
@@ -286,20 +342,44 @@ const CallModals: React.FC<CallModalsProps> = ({
     setTimerId(id);
   };
 
-  // Function to initiate a call
+  // Enhanced function to initiate a call
   const initiateCall = (targetUserId: string, targetUserName: string, targetUserPicture: string = '/default-profile.png') => {
+    const currentTime = Date.now();
+    
+    // Prevent rapid call attempts (rate limiting)
+    if (currentTime - lastCallAttempt < 2000) {
+      showNotification('Rate Limited', 'Please wait before making another call attempt', 'error');
+      return false;
+    }
+    setLastCallAttempt(currentTime);
+    
+    // Check socket connection
     if (!socket || !userId) {
-      showNotification('Connection Error', 'Cannot make call: connection not ready');
+      showNotification('Connection Error', 'Call system is not ready. Please try again.', 'error');
       return false;
     }
     
     if (!socket.connected) {
-      showNotification('Connection Error', 'Socket not connected. Please try again in a moment.');
+      showNotification('Connection Error', 'Not connected to server. Please check your connection and try again.', 'error');
       return false;
     }
     
-    // Generate a call ID
-    const callId = `call-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    // Check if already in a call
+    if (callState.isIncoming || callState.isOutgoing) {
+      showNotification('Call in Progress', 'You are already in a call', 'error');
+      return false;
+    }
+    
+    // Validate target user
+    if (!targetUserId || targetUserId === userId.toString()) {
+      showNotification('Invalid Call', 'Cannot call yourself', 'error');
+      return false;
+    }
+    
+    // Generate a unique call ID
+    const callId = `call-${Date.now()}-${userId}-${Math.floor(Math.random() * 1000)}`;
+    
+    console.log(`Initiating call to user ${targetUserId} (${targetUserName})`);
     
     // Update local call state
     setCallState({
@@ -327,18 +407,10 @@ const CallModals: React.FC<CallModalsProps> = ({
     // Start call timer
     startCallTimer();
     
-    // Play a dialing sound
-    try {
-      const audio = new Audio('/sounds/dialing.mp3'); // Make sure to add this sound
-      audio.loop = true;
-      audio.play().catch(e => console.log('Audio play error:', e));
-      
-      // Store the audio element to stop it later
-      (window as any).callRingtone = audio;
-    } catch (e) {
-      console.log('Error playing dialing sound:', e);
-    }
+    // Play dialing sound
+    playRingtone('/sounds/dialing.mp3', true);
     
+    console.log(`Call initiated successfully. Call ID: ${callId}`);
     return true;
   };
 
@@ -346,7 +418,7 @@ const CallModals: React.FC<CallModalsProps> = ({
   const handleAcceptCall = () => {
     if (!socket || !callState.isIncoming) return;
     
-    // Stop ringtone
+    console.log('Accepting incoming call:', callState.callId);
     stopRingtone();
     
     socket.emit('accept_call', {
@@ -359,17 +431,14 @@ const CallModals: React.FC<CallModalsProps> = ({
       calleePicture: callState.calleePicture,
     });
     
-    // Start call duration timer
     startCallDurationTimer();
-    
-    // The session_ready event will handle redirecting to the live session
   };
 
   // Handle declining an incoming call
   const handleDeclineCall = () => {
     if (!socket || !callState.isIncoming) return;
     
-    // Stop ringtone
+    console.log('Declining incoming call:', callState.callId);
     stopRingtone();
     
     socket.emit('decline_call', {
@@ -385,7 +454,7 @@ const CallModals: React.FC<CallModalsProps> = ({
   const handleCancelCall = () => {
     if (!socket || !callState.isOutgoing) return;
     
-    // Stop dialing sound
+    console.log('Cancelling outgoing call:', callState.callId);
     stopRingtone();
     
     socket.emit('cancel_call', {
@@ -397,32 +466,67 @@ const CallModals: React.FC<CallModalsProps> = ({
     resetCallState();
   };
 
-  // Expose the initiateCall function to the parent component
+  // Expose the initiateCall function to the window object with better management
   useEffect(() => {
-    if (typeof window !== 'undefined' && socket) {
+    if (typeof window !== 'undefined' && socket && isConnected) {
       console.log('Exposing initiateCall function to window');
-      // @ts-ignore - We're deliberately attaching to window
+      
+      // Clear any existing function
+      if (window.initiateCall) {
+        delete window.initiateCall;
+      }
+      
+      // Set new function with metadata
       window.initiateCall = initiateCall;
       window.initiateCallSocketId = socket.id;
+      window.initiateCallUserId = userId;
       window.initiateCallReady = true;
       setFunctionReady(true);
+      
+      console.log('initiateCall function is now available globally');
+    } else if (typeof window !== 'undefined') {
+      // Clean up if socket is not connected
+      window.initiateCallReady = false;
+      setFunctionReady(false);
     }
     
     return () => {
       if (typeof window !== 'undefined') {
-        // Only remove if this is the component that set it
-        if (window.initiateCallSocketId === socket?.id) {
+        // Only clean up if this is our function
+        if (window.initiateCallSocketId === socket?.id && window.initiateCallUserId === userId) {
           console.log('Cleaning up initiateCall function');
-          // @ts-ignore - Clean up
           window.initiateCallReady = false;
           delete window.initiateCall;
           delete window.initiateCallSocketId;
+          delete window.initiateCallUserId;
+          setFunctionReady(false);
         }
       }
     };
-  }, [socket, userId, userName]);
+  }, [socket, userId, userName, isConnected]);
 
-  // Only render modals if there's an active call and we have a portal element
+  // Clean up on page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (callState.isIncoming || callState.isOutgoing) {
+        if (callState.isIncoming) {
+          handleDeclineCall();
+        } else {
+          handleCancelCall();
+        }
+      }
+      stopRingtone();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      stopRingtone();
+    };
+  }, [callState]);
+
+  // Don't render if no active call or no portal element
   if ((!callState.isIncoming && !callState.isOutgoing) || !portalElement) {
     return null;
   }
@@ -430,18 +534,19 @@ const CallModals: React.FC<CallModalsProps> = ({
   // Use React createPortal to render modals at the document body level
   return createPortal(
     <>
-      {/* Backdrop with blur effect */}
-      <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm z-50 flex items-center justify-center">
-        {/* Modal Container with glass effect */}
-        <div className="bg-white bg-opacity-90 rounded-2xl shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+      {/* Enhanced backdrop with blur effect */}
+      <div className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-md z-50 flex items-center justify-center">
+        {/* Enhanced modal container with better animations */}
+        <div className="bg-white bg-opacity-95 rounded-3xl shadow-2xl max-w-md w-full mx-4 overflow-hidden transform transition-all duration-300 scale-100">
           {/* Incoming Call Modal */}
           {callState.isIncoming && (
             <div className="flex flex-col items-center p-8">
-              {/* Caller info with pulsing animation */}
-              <div className="relative mb-6">
-                <div className="absolute inset-0 rounded-full bg-green-400 opacity-20 animate-ping"></div>
-                <div className="absolute inset-0 rounded-full bg-green-300 opacity-30 animate-pulse"></div>
-                <div className="relative w-24 h-24 rounded-full overflow-hidden border-4 border-green-400 shadow-lg">
+              {/* Enhanced caller info with animated rings */}
+              <div className="relative mb-8">
+                <div className="absolute inset-0 rounded-full bg-green-400 opacity-30 animate-ping scale-125"></div>
+                <div className="absolute inset-0 rounded-full bg-green-300 opacity-40 animate-pulse scale-110"></div>
+                <div className="absolute inset-0 rounded-full bg-green-500 opacity-20 animate-ping scale-150 animation-delay-500"></div>
+                <div className="relative w-28 h-28 rounded-full overflow-hidden border-4 border-green-400 shadow-xl">
                   <img 
                     src={callState.callerPicture} 
                     alt={callState.callerName}
@@ -453,42 +558,45 @@ const CallModals: React.FC<CallModalsProps> = ({
                 </div>
               </div>
               
-              <h2 className="text-2xl font-bold text-black mb-2">{callState.callerName}</h2>
-              <p className="text-lg font-medium mb-6 text-black">is calling you...</p>
+              <h2 className="text-3xl font-bold text-gray-900 mb-2">{callState.callerName}</h2>
+              <p className="text-lg font-medium mb-8 text-gray-600 flex items-center">
+                <span className="inline-block w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
+                Incoming call...
+              </p>
               
-              {/* Timer with progress bar */}
-              <div className="w-full mb-8">
-                <div className="h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+              {/* Enhanced timer with circular progress */}
+              <div className="w-full mb-10">
+                <div className="relative h-2 w-full bg-gray-200 rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-red-500 transition-all duration-1000 ease-linear"
-                    style={{ width: `${(timer / 30) * 100}%` }}
+                    className="absolute h-full bg-gradient-to-r from-yellow-400 to-red-500 transition-all duration-1000 ease-linear"
+                    style={{ width: `${((30 - timer) / 30) * 100}%` }}
                   ></div>
                 </div>
-                <p className="text-sm mt-2 text-center text-black">
-                  Call expires in {timer} seconds
+                <p className="text-sm mt-3 text-center text-gray-600">
+                  Auto-decline in <span className="font-semibold text-red-600">{timer}</span> seconds
                 </p>
               </div>
               
-              {/* Call actions */}
-              <div className="flex justify-center items-center space-x-10">
+              {/* Enhanced call actions */}
+              <div className="flex justify-center items-center space-x-16">
                 <button 
                   onClick={handleDeclineCall}
-                  className="flex flex-col items-center justify-center"
+                  className="group flex flex-col items-center"
                 >
-                  <div className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center mb-2 transform transition-transform hover:scale-110 active:scale-95 shadow-lg">
-                    <MdCallEnd className="h-8 w-8 text-white" />
+                  <div className="w-20 h-20 rounded-full bg-red-500 flex items-center justify-center mb-3 transform transition-all duration-200 group-hover:scale-110 group-active:scale-95 shadow-lg group-hover:shadow-xl">
+                    <MdCallEnd className="h-10 w-10 text-white" />
                   </div>
-                  <span className="text-black">Decline</span>
+                  <span className="text-gray-700 font-medium">Decline</span>
                 </button>
                 
                 <button 
                   onClick={handleAcceptCall}
-                  className="flex flex-col items-center justify-center"
+                  className="group flex flex-col items-center"
                 >
-                  <div className="w-16 h-16 rounded-full bg-green-500 flex items-center justify-center mb-2 transform transition-transform hover:scale-110 active:scale-95 shadow-lg">
-                    <MdCall className="h-8 w-8 text-white" />
+                  <div className="w-20 h-20 rounded-full bg-green-500 flex items-center justify-center mb-3 transform transition-all duration-200 group-hover:scale-110 group-active:scale-95 shadow-lg group-hover:shadow-xl">
+                    <MdCall className="h-10 w-10 text-white" />
                   </div>
-                  <span className="text-black">Accept</span>
+                  <span className="text-gray-700 font-medium">Accept</span>
                 </button>
               </div>
             </div>
@@ -497,11 +605,12 @@ const CallModals: React.FC<CallModalsProps> = ({
           {/* Outgoing Call Modal */}
           {callState.isOutgoing && (
             <div className="flex flex-col items-center p-8">
-              {/* Animated connecting circles */}
+              {/* Enhanced calling animation */}
               <div className="relative mb-8">
-                <div className="absolute inset-0 rounded-full bg-blue-400 opacity-20 animate-ping"></div>
-                <div className="absolute inset-0 rounded-full bg-blue-300 opacity-30 animate-pulse"></div>
-                <div className="relative w-24 h-24 rounded-full overflow-hidden border-4 border-blue-400 shadow-lg">
+                <div className="absolute inset-0 rounded-full bg-blue-400 opacity-30 animate-ping scale-125"></div>
+                <div className="absolute inset-0 rounded-full bg-blue-300 opacity-40 animate-pulse scale-110"></div>
+                <div className="absolute inset-0 rounded-full bg-blue-500 opacity-20 animate-ping scale-150 animation-delay-700"></div>
+                <div className="relative w-28 h-28 rounded-full overflow-hidden border-4 border-blue-400 shadow-xl">
                   <img 
                     src={callState.calleePicture} 
                     alt={callState.calleeName}
@@ -513,43 +622,55 @@ const CallModals: React.FC<CallModalsProps> = ({
                 </div>
               </div>
               
-              <h2 className="text-2xl font-bold mb-2 text-black">{callState.calleeName}</h2>
-              <div className="flex items-center space-x-2 mb-8">
-                <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse"></span>
-                <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" style={{animationDelay: '0.3s'}}></span>
-                <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" style={{animationDelay: '0.6s'}}></span>
-                <span className="text-lg font-medium ml-2 text-black">Calling</span>
+              <h2 className="text-3xl font-bold mb-4 text-gray-900">{callState.calleeName}</h2>
+              <div className="flex items-center space-x-3 mb-10">
+                <div className="flex space-x-1">
+                  <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-bounce"></span>
+                  <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></span>
+                  <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></span>
+                </div>
+                <span className="text-lg font-medium text-gray-600">Calling</span>
               </div>
               
-              {/* Timer with progress bar */}
-              <div className="w-full mb-8">
-                <div className="h-1 w-full bg-gray-200 rounded-full overflow-hidden">
+              {/* Enhanced timer */}
+              <div className="w-full mb-10">
+                <div className="relative h-2 w-full bg-gray-200 rounded-full overflow-hidden">
                   <div 
-                    className="h-full bg-red-500 transition-all duration-1000 ease-linear"
-                    style={{ width: `${(timer / 30) * 100}%` }}
+                    className="absolute h-full bg-gradient-to-r from-blue-400 to-red-500 transition-all duration-1000 ease-linear"
+                    style={{ width: `${((30 - timer) / 30) * 100}%` }}
                   ></div>
                 </div>
-                <p className="text-sm mt-2 text-center text-black">
-                  Call expires in {timer} seconds
+                <p className="text-sm mt-3 text-center text-gray-600">
+                  Call expires in <span className="font-semibold text-red-600">{timer}</span> seconds
                 </p>
               </div>
               
-              {/* Call actions */}
+              {/* Enhanced call action */}
               <div className="flex justify-center items-center">
                 <button 
                   onClick={handleCancelCall}
-                  className="flex flex-col items-center justify-center"
+                  className="group flex flex-col items-center"
                 >
-                  <div className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center mb-2 transform transition-transform hover:scale-110 active:scale-95 shadow-lg">
-                    <MdCallEnd className="h-8 w-8 text-white" />
+                  <div className="w-20 h-20 rounded-full bg-red-500 flex items-center justify-center mb-3 transform transition-all duration-200 group-hover:scale-110 group-active:scale-95 shadow-lg group-hover:shadow-xl">
+                    <MdCallEnd className="h-10 w-10 text-white" />
                   </div>
-                  <span className="text-black">End Call</span>
+                  <span className="text-gray-700 font-medium">End Call</span>
                 </button>
               </div>
             </div>
           )}
         </div>
       </div>
+      
+      {/* Add custom styles for animations */}
+      <style jsx>{`
+        .animation-delay-500 {
+          animation-delay: 0.5s;
+        }
+        .animation-delay-700 {
+          animation-delay: 0.7s;
+        }
+      `}</style>
     </>,
     portalElement
   );
