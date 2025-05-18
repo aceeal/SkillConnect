@@ -1,8 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { signIn, useSession } from 'next-auth/react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { signIn, signOut, useSession } from 'next-auth/react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const Toast = ({ message, isVisible, onClose, type = 'info' }) => {
@@ -10,7 +10,7 @@ const Toast = ({ message, isVisible, onClose, type = 'info' }) => {
     if (isVisible) {
       const timer = setTimeout(() => {
         onClose();
-      }, 3000);
+      }, 5000); // Longer timeout for banned message
       return () => clearTimeout(timer);
     }
   }, [isVisible, onClose]);
@@ -77,7 +77,7 @@ const Toast = ({ message, isVisible, onClose, type = 'info' }) => {
           <motion.div 
             initial={{ width: "100%" }}
             animate={{ width: "0%" }}
-            transition={{ duration: 3, ease: "linear" }}
+            transition={{ duration: 5, ease: "linear" }}
             className={`h-1 mt-2 rounded-full ${styles.progressBar}`}
           />
         </motion.div>
@@ -111,6 +111,7 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
   const { status } = useSession();
+  const searchParams = useSearchParams();
   
   const [toast, setToast] = useState({
     message: '',
@@ -135,10 +136,25 @@ export default function LoginPage() {
   };
 
   useEffect(() => {
+    // Check for banned parameter in URL
+    const banned = searchParams.get('banned');
+    const shouldSignOut = searchParams.get('signout');
+    
+    if (banned === 'true') {
+      setError('Your account has been banned. Please contact support for assistance.');
+      showToast('Your account has been banned. Please contact support for assistance.', 'error');
+      
+      // If signout parameter is present, sign out the user
+      if (shouldSignOut === 'true') {
+        signOut({ redirect: false });
+      }
+    }
+    
+    // If authenticated and not banned, redirect to home
     if (status === 'authenticated') {
       router.push('/');
     }
-  }, [status, router]);
+  }, [status, router, searchParams]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -153,13 +169,21 @@ export default function LoginPage() {
       });
   
       if (result?.error) {
-        setError(result.error);
+        // Check if error is about banned account
+        if (result.error.includes('banned')) {
+          setError(result.error);
+          showToast(result.error, 'error');
+        } else {
+          setError(result.error);
+        }
         setIsLoading(false);
         return;
       }
   
       if (result.ok) {
-        router.push('/');
+        // Get callback URL or default to home
+        const callbackUrl = searchParams.get('callbackUrl') || '/';
+        router.push(callbackUrl);
       }
     } catch (err) {
       setError('An unexpected error occurred. Please try again.');
@@ -222,6 +246,7 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               className="mt-1 block w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 transition-all duration-300"
               required
+              disabled={searchParams.get('banned') === 'true'}
             />
           </motion.div>
 
@@ -242,6 +267,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 className="block w-full px-4 py-2 pr-12 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-gray-900 transition-all duration-300"
                 required
+                disabled={searchParams.get('banned') === 'true'}
                 style={{ 
                   WebkitTextSecurity: showPassword ? 'none' : 'disc',
                 }}
@@ -251,6 +277,7 @@ export default function LoginPage() {
                 onClick={togglePasswordVisibility}
                 className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-gray-600 transition-colors duration-200"
                 tabIndex={-1}
+                disabled={searchParams.get('banned') === 'true'}
               >
                 <EyeIcon isVisible={showPassword} />
               </button>
@@ -270,9 +297,18 @@ export default function LoginPage() {
             <motion.div 
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="text-red-500 text-sm text-center p-2 bg-red-50 rounded-md"
+              className={`text-sm text-center p-3 rounded-md ${
+                error.includes('banned') 
+                  ? 'text-red-700 bg-red-50 border border-red-200' 
+                  : 'text-red-500 bg-red-50'
+              }`}
             >
               {error}
+              {error.includes('banned') && (
+                <div className="mt-2 text-xs text-red-600">
+                  If you believe this is a mistake, please contact our support team.
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -283,8 +319,12 @@ export default function LoginPage() {
           >
             <button
               type="submit"
-              disabled={isLoading}
-              className="w-full bg-primary text-white px-4 py-3 rounded-lg border-2 border-primary hover:bg-white hover:text-primary transition-all duration-300 active:scale-95 active:shadow-inner flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50"
+              disabled={isLoading || searchParams.get('banned') === 'true'}
+              className={`w-full px-4 py-3 rounded-lg border-2 transition-all duration-300 active:scale-95 active:shadow-inner flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-50 ${
+                searchParams.get('banned') === 'true'
+                  ? 'bg-gray-300 text-gray-500 border-gray-300 cursor-not-allowed'
+                  : 'bg-primary text-white border-primary hover:bg-white hover:text-primary'
+              }`}
             >
               {isLoading ? (
                 <span className="flex items-center">
@@ -294,6 +334,8 @@ export default function LoginPage() {
                   </svg>
                   Logging in...
                 </span>
+              ) : searchParams.get('banned') === 'true' ? (
+                "Account Banned"
               ) : (
                 "Log In"
               )}
@@ -309,11 +351,35 @@ export default function LoginPage() {
         >
           <p className="text-sm text-gray-600">
             Don't have an account?{' '}
-            <Link href="/signup" className="text-primary hover:underline transition-all duration-300">
+            <Link 
+              href="/signup" 
+              className={`transition-all duration-300 ${
+                searchParams.get('banned') === 'true'
+                  ? 'text-gray-400 cursor-not-allowed'
+                  : 'text-primary hover:underline'
+              }`}
+            >
               Sign up
             </Link>
           </p>
         </motion.div>
+
+        {/* Support contact for banned users */}
+        {searchParams.get('banned') === 'true' && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.8, duration: 0.5 }}
+            className="mt-4 p-3 bg-gray-50 rounded-md text-center"
+          >
+            <p className="text-xs text-gray-600">
+              Need help? Contact our support team at{' '}
+              <a href="skillconnectcapstone@gmail.com" className="text-primary hover:underline">
+                skillconnectcapstone@gmail.com
+              </a>
+            </p>
+          </motion.div>
+        )}
       </motion.div>
     </div>
   );

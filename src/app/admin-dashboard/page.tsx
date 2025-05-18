@@ -125,6 +125,7 @@ export default function AdminDashboard() {
         profilePicture: user.profile_picture || user.profilePicture || null,
         role: user.role || 'user',
         status: user.status || 'active',
+        onlineStatus: user.onlineStatus || user.online_status || 'offline', // Add online status
         // Fix the date mapping - handle both snake_case and camelCase
         createdAt: user.created_at || user.createdAt || new Date().toISOString(),
         lastLogin: user.last_login || user.lastLogin || user.lastActive || null,
@@ -421,6 +422,7 @@ export default function AdminDashboard() {
     setFilteredUsers(filtered);
   };
 
+  // Updated toggle user status function
   const handleToggleUserStatus = async (userId, currentStatus) => {
     try {
       const newStatus = currentStatus === 'active' ? 'banned' : 'active';
@@ -438,13 +440,19 @@ export default function AdminDashboard() {
         throw new Error(errorData.error || `Failed to update user status: ${response.status}`);
       }
       
+      const data = await response.json();
+      console.log('Status update response:', data);
+      
+      // Update the user in state with the new status
       setUsers(users.map(user => 
-        user.id === userId ? { ...user, status: newStatus } : user
+        user.id.toString() === userId.toString() ? { ...user, status: newStatus } : user
       ));
       
       setFilteredUsers(filteredUsers.map(user => 
-        user.id === userId ? { ...user, status: newStatus } : user
+        user.id.toString() === userId.toString() ? { ...user, status: newStatus } : user
       ));
+      
+      alert(`User successfully ${newStatus === 'banned' ? 'banned' : 'unbanned'}`);
       
     } catch (error) {
       console.error('Error updating user status:', error);
@@ -546,7 +554,7 @@ export default function AdminDashboard() {
 
   const handleExportUserData = () => {
     try {
-      const headers = ['ID', 'First Name', 'Last Name', 'Email', 'Status', 'Created At', 'Last Login'];
+      const headers = ['ID', 'First Name', 'Last Name', 'Email', 'Status', 'Online Status', 'Created At', 'Last Login'];
       const csvContent = [
         headers.join(','),
         ...users.map(user => [
@@ -555,6 +563,7 @@ export default function AdminDashboard() {
           `"${user.lastName}"`,
           user.email,
           user.status,
+          user.onlineStatus,
           new Date(user.createdAt).toLocaleString(),
           user.lastLogin ? new Date(user.lastLogin).toLocaleString() : 'Never'
         ].join(','))
@@ -1112,7 +1121,7 @@ export default function AdminDashboard() {
                               Email
                             </th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
-                              Status
+                              Status (Account/Online)
                             </th>
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
                               Joined
@@ -1157,11 +1166,24 @@ export default function AdminDashboard() {
                                 <div className="text-sm text-gray-900">{user.email}</div>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap w-1/6">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                  user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {user.status}
-                                </span>
+                                <div className="flex flex-col space-y-1">
+                                  {/* Account Status (for admin actions) */}
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    user.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                  }`}>
+                                    {user.status === 'active' ? 'Active' : 'Banned'}
+                                  </span>
+                                  
+                                  {/* Online Status (shows connectivity) */}
+                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                    user.onlineStatus === 'online' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    <span className={`w-2 h-2 rounded-full mr-1 ${
+                                      user.onlineStatus === 'online' ? 'bg-green-500' : 'bg-gray-400'
+                                    }`}></span>
+                                    {user.onlineStatus === 'online' ? 'Online' : 'Offline'}
+                                  </span>
+                                </div>
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 w-1/6">
                                 {formatDate(user.createdAt)}

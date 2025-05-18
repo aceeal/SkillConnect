@@ -21,28 +21,7 @@ export async function GET(request: Request) {
     const onlineThreshold = new Date();
     onlineThreshold.setMinutes(onlineThreshold.getMinutes() - 15);
     
-    // Check if account_status column exists
-    let hasAccountStatusColumn = false;
-    try {
-      const statusCheck = await executeQuery({
-        query: `
-          SELECT COLUMN_NAME 
-          FROM INFORMATION_SCHEMA.COLUMNS 
-          WHERE TABLE_SCHEMA = DATABASE() 
-          AND TABLE_NAME = 'users' 
-          AND COLUMN_NAME = 'account_status'
-        `,
-        values: []
-      });
-      hasAccountStatusColumn = Array.isArray(statusCheck) && statusCheck.length > 0;
-    } catch (error) {
-      console.log('Could not check for account_status column:', error);
-    }
-    
-    // Build query with conditional account_status column
-    let accountStatusSelect = hasAccountStatusColumn ? 'u.account_status,' : '';
-    let accountStatusDefaultValue = hasAccountStatusColumn ? '' : "'active' AS account_status,";
-    
+    // Build the main query - using account_status for admin moderation
     let query = `
       SELECT 
         u.id, 
@@ -54,8 +33,7 @@ export async function GET(request: Request) {
         u.created_at,
         u.last_login,
         u.updated_at,
-        ${accountStatusSelect}
-        ${accountStatusDefaultValue}
+        u.account_status,
         s.skill AS skill,
         i.interest AS interest,
         CASE 
@@ -83,13 +61,11 @@ export async function GET(request: Request) {
       whereConditions.push("u.role = 'user'");
     }
     
-    // Add filter condition
+    // Add filter condition based on online/offline status
     if (filter === 'online') {
       whereConditions.push('u.last_login > ?');
     } else if (filter === 'offline') {
       whereConditions.push('(u.last_login IS NULL OR u.last_login <= ?)');
-    } else if (filter === 'all') {
-      // Show all users regardless of online/offline or account status
     }
     
     // Add search condition
@@ -133,7 +109,7 @@ export async function GET(request: Request) {
     // Execute query
     const result = await executeQuery({ query, values });
     
-    // Process the results - separate online_status and account_status
+    // Process the results - map account_status to status for frontend compatibility
     const users = Array.isArray(result) ? result.map(user => ({
       id: user.id,
       name: `${user.first_name} ${user.last_name}`,
@@ -145,7 +121,7 @@ export async function GET(request: Request) {
       profilePicture: user.profile_picture,
       profile_picture: user.profile_picture, // For compatibility
       role: user.role,
-      // This is for admin moderation (active/banned)
+      // Map account_status to status for frontend (this is for admin moderation: active/banned)
       status: user.account_status || 'active',
       // This is for user activity status (online/offline)
       onlineStatus: user.online_status,

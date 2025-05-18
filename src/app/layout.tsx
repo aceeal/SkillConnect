@@ -7,6 +7,7 @@ import Footer from '@/app/components/footer';
 import { Providers } from './providers';
 import GlobalCallHandler from '@/app/components/GlobalCallHandler';
 import ChatBubble from '@/app/components/chat';
+import SessionCheck from '@/app/components/SessionCheck';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -35,6 +36,7 @@ export default function RootLayout({
     <html lang="en" className={`${inter.variable} font-sans`}>
       <body>
         <Providers>
+          <SessionCheck />
           <GlobalCallHandler />
           <Navbar />
           {children}
