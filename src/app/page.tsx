@@ -208,23 +208,30 @@ export default function Home() {
                 <span className="text-sm font-medium">Welcome Back</span>
               </div>
               
-              {/* Profile Image - Centered */}
+              {/* Profile Image - Centered - UPDATED WITH SIMPLE FIX */}
               <div className="mb-6 animate-fade-in">
                 <div className="relative mx-auto">
                   <div className="w-28 h-28 rounded-full bg-white bg-opacity-20 border-4 border-white border-opacity-30 overflow-hidden shadow-2xl mx-auto transform hover:scale-105 transition-transform duration-500">
                     {session?.user?.image ? (
                       <Image
-                        src={session.user.image}
+                        key={session.user.image} // Forces re-render when image URL changes
+                        src={`${session.user.image}?v=${Date.now()}`} // Cache busting
                         alt={session.user.name || 'Profile'}
                         width={112}
                         height={112}
                         className="w-full h-full object-cover"
+                        onError={(e) => {
+                          // If image fails to load, hide it and show fallback
+                          e.currentTarget.style.display = 'none';
+                          if (e.currentTarget.nextElementSibling) {
+                            e.currentTarget.nextElementSibling.style.display = 'flex';
+                          }
+                        }}
                       />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-white text-4xl font-bold bg-primary-light">
-                        {session?.user?.name?.charAt(0).toUpperCase() || 'U'}
-                      </div>
-                    )}
+                    ) : null}
+                    <div className="w-full h-full flex items-center justify-center text-white text-4xl font-bold bg-primary-light" style={{ display: session?.user?.image ? 'none' : 'flex' }}>
+                      {session?.user?.name?.charAt(0).toUpperCase() || 'U'}
+                    </div>
                   </div>
                   
                   {/* Decorative elements */}

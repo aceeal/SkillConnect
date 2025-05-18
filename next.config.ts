@@ -1,13 +1,19 @@
-// /next.config.js - Updated with Cloudinary support
+// /next.config.js - Enhanced with better image handling
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
+    // Add more common image domains
     domains: [
       'localhost',
       'encrypted-tbn0.gstatic.com',
       'static.vecteezy.com',
       'wallpapers.com',
-      'res.cloudinary.com', // Add Cloudinary domain
+      'res.cloudinary.com', // Cloudinary
+      'images.unsplash.com', // Unsplash
+      'via.placeholder.com', // Placeholder service
+      'picsum.photos', // Lorem Picsum
+      'i.imgur.com', // Imgur
+      'lh3.googleusercontent.com', // Google Photos/Profile
     ],
     remotePatterns: [
       {
@@ -26,17 +32,43 @@ const nextConfig = {
         protocol: 'http',
         hostname: 'localhost',
       },
-      // Add Cloudinary pattern specifically
+      // Cloudinary specific pattern
       {
         protocol: 'https',
         hostname: 'res.cloudinary.com',
       },
-      // Allow any HTTPS domain for profile pictures
+      // Common image hosting services
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'via.placeholder.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'picsum.photos',
+      },
+      {
+        protocol: 'https',
+        hostname: 'i.imgur.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
+      },
+      // Allow any HTTPS domain (keep as fallback)
       {
         protocol: 'https',
         hostname: '**',
       }
     ],
+    // Add these options for better image handling
+    formats: ['image/webp', 'image/avif'],
+    minimumCacheTTL: 60,
+    dangerouslyAllowSVG: true,
+    contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
   reactStrictMode: true,
   webpack: (config) => {
