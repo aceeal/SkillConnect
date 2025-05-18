@@ -18,7 +18,6 @@ import {
   FiUserCheck,
   FiTrash2,
   FiEye,
-  FiX,
   FiVideo,
   FiFlag,
   FiDownload,
@@ -26,7 +25,9 @@ import {
   FiCheck,
   FiAlertCircle,
   FiInfo,
-  FiList
+  FiList,
+  FiChevronLeft,
+  FiChevronRight
 } from 'react-icons/fi';
 
 export default function AdminDashboard() {
@@ -53,6 +54,15 @@ export default function AdminDashboard() {
   const [feedback, setFeedback] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errors, setErrors] = useState({});
+  
+  // Pagination states for session logs
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10); // You can make this adjustable if needed
+  
+  // Pagination states for user lists
+  const [currentUserPage, setCurrentUserPage] = useState(1);
+  const [usersPerPage] = useState(10); // You can make this adjustable if needed
+  
   const [stats, setStats] = useState({
     totalUsers: 0,
     newUsersToday: 0,
@@ -301,6 +311,9 @@ export default function AdminDashboard() {
       }));
       
       setCompletedSessions(sessionsWithUserDetails);
+      
+      // Reset to first page when sessions are fetched
+      setCurrentPage(1);
     } catch (error) {
       console.error('Error fetching completed sessions:', error);
       setErrors(prev => ({...prev, completedSessions: error.message}));
@@ -410,16 +423,17 @@ export default function AdminDashboard() {
     
     if (!term.trim()) {
       setFilteredUsers(users);
-      return;
+    } else {
+      const filtered = users.filter(user => 
+        user.firstName.toLowerCase().includes(term.toLowerCase()) || 
+        user.lastName.toLowerCase().includes(term.toLowerCase()) || 
+        user.email.toLowerCase().includes(term.toLowerCase())
+      );
+      setFilteredUsers(filtered);
     }
     
-    const filtered = users.filter(user => 
-      user.firstName.toLowerCase().includes(term.toLowerCase()) || 
-      user.lastName.toLowerCase().includes(term.toLowerCase()) || 
-      user.email.toLowerCase().includes(term.toLowerCase())
-    );
-    
-    setFilteredUsers(filtered);
+    // Reset to first page when search changes
+    setCurrentUserPage(1);
   };
 
   // Updated toggle user status function
@@ -585,43 +599,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleTerminateSession = async (sessionId) => {
-    if (confirm('Are you sure you want to terminate this session?')) {
-      try {
-        const response = await fetch(`/api/admin/sessions/terminate`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ sessionId })
-        });
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `Failed to terminate session: ${response.status}`);
-        }
-        
-        // Remove the terminated session from live sessions
-        setLiveSessions(liveSessions.filter(session => session.id !== sessionId));
-        
-        // Update stats for active sessions
-        setStats(prevStats => ({
-          ...prevStats,
-          activeSessions: prevStats.activeSessions - 1
-        }));
-        
-        // Refresh completed sessions to show the newly terminated one
-        fetchCompletedSessions();
-        
-        alert('Session terminated successfully.');
-        
-      } catch (error) {
-        console.error('Error terminating session:', error);
-        alert('Failed to terminate session: ' + error.message);
-      }
-    }
-  };
-
   const formatDate = (dateString) => {
     try {
       if (!dateString) return 'Not available';
@@ -656,6 +633,70 @@ export default function AdminDashboard() {
       return '00:00:00';
     }
   };
+
+  // Pagination logic for session logs
+  const getFilteredCompletedSessions = () => {
+    return completedSessions.filter(session => 
+      sessionLogFilter === 'all' || session.status === sessionLogFilter
+    );
+  };
+
+  const getPaginatedSessions = () => {
+    const filteredSessions = getFilteredCompletedSessions();
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filteredSessions.slice(startIndex, endIndex);
+  };
+
+  const getTotalPages = () => {
+    const filteredSessions = getFilteredCompletedSessions();
+    return Math.ceil(filteredSessions.length / itemsPerPage);
+  };
+
+  const handlePrevePage = () => {
+    setCurrentPage(prev => Math.max(prev - 1, 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage(prev => Math.min(prev + 1, getTotalPages()));
+  };
+
+  const handlePageClick = (pageNumber) => {
+    setCurrentPage(pageNumber);
+  };
+
+  // Pagination logic for user lists
+  const getPaginatedUsers = () => {
+    const startIndex = (currentUserPage - 1) * usersPerPage;
+    const endIndex = startIndex + usersPerPage;
+    return filteredUsers.slice(startIndex, endIndex);
+  };
+
+  const getTotalUserPages = () => {
+    return Math.ceil(filteredUsers.length / usersPerPage);
+  };
+
+  const handleUserPrevePage = () => {
+    setCurrentUserPage(prev => Math.max(prev - 1, 1));
+  };
+
+  const handleUserNextPage = () => {
+    setCurrentUserPage(prev => Math.min(prev + 1, getTotalUserPages()));
+  };
+
+  const handleUserPageClick = (pageNumber) => {
+    setCurrentUserPage(pageNumber);
+  };
+
+  // Reset to page 1 when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [sessionLogFilter]);
+
+  // Reset to page 1 when users data changes
+  useEffect(() => {
+    setCurrentUserPage(1);
+  }, [users]);
 
   if (isLoading) {
     return (
@@ -1135,7 +1176,7 @@ export default function AdminDashboard() {
                           </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                          {filteredUsers.map((user) => (
+                          {getPaginatedUsers().map((user) => (
                             <tr key={user.id} className="hover:bg-gray-50">
                               <td className="px-6 py-4 whitespace-nowrap w-1/4">
                                 <div className="flex items-center">
@@ -1224,6 +1265,66 @@ export default function AdminDashboard() {
                       </table>
                     )}
                   </div>
+                  
+                  {/* Pagination Controls for Users */}
+                  {filteredUsers.length > 0 && getTotalUserPages() > 1 && (
+                    <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-700">
+                          Showing {Math.min((currentUserPage - 1) * usersPerPage + 1, filteredUsers.length)} to{' '}
+                          {Math.min(currentUserPage * usersPerPage, filteredUsers.length)} of{' '}
+                          {filteredUsers.length} results
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <button
+                          onClick={handleUserPrevePage}
+                          disabled={currentUserPage === 1}
+                          className={`p-2 rounded-md text-sm font-medium ${
+                            currentUserPage === 1
+                              ? 'text-gray-400 cursor-not-allowed'
+                              : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          <FiChevronLeft className="h-4 w-4" />
+                        </button>
+                        
+                        {/* Page numbers */}
+                        {Array.from({ length: Math.min(5, getTotalUserPages()) }, (_, i) => {
+                          const startPage = Math.max(1, currentUserPage - 2);
+                          const pageNumber = startPage + i;
+                          
+                          if (pageNumber > getTotalUserPages()) return null;
+                          
+                          return (
+                            <button
+                              key={pageNumber}
+                              onClick={() => handleUserPageClick(pageNumber)}
+                              className={`px-3 py-1 rounded-md text-sm font-medium ${
+                                currentUserPage === pageNumber
+                                  ? 'bg-blue-500 text-white'
+                                  : 'text-gray-700 hover:bg-gray-100'
+                              }`}
+                            >
+                              {pageNumber}
+                            </button>
+                          );
+                        })}
+                        
+                        <button
+                          onClick={handleUserNextPage}
+                          disabled={currentUserPage === getTotalUserPages()}
+                          className={`p-2 rounded-md text-sm font-medium ${
+                            currentUserPage === getTotalUserPages()
+                              ? 'text-gray-400 cursor-not-allowed'
+                              : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          <FiChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}
@@ -1414,7 +1515,7 @@ export default function AdminDashboard() {
                               <p className="text-sm text-gray-700">Duration: <span className="font-medium">{calculateDuration(session.startedAt)}</span></p>
                             </div>
                             
-                            <div className="flex justify-between mb-4">
+                            <div className="flex justify-between">
                               <div className="flex items-center">
                                 <div className="h-8 w-8 rounded-full bg-blue-300 flex items-center justify-center overflow-hidden">
                                   {session.user1ProfilePicture ? (
@@ -1451,16 +1552,6 @@ export default function AdminDashboard() {
                                 </div>
                                 <span className="ml-2 text-sm text-gray-900">{session.user2Name || 'User 2'}</span>
                               </div>
-                            </div>
-                            
-                            <div className="flex justify-end">
-                              <button
-                                onClick={() => handleTerminateSession(session.id)}
-                                className="inline-flex items-center px-2 py-1 border border-transparent text-xs font-medium rounded text-red-700 bg-red-100 hover:bg-red-200"
-                              >
-                                <FiX className="mr-1 h-3 w-3" />
-                                Terminate
-                              </button>
                             </div>
                           </div>
                         ))}
@@ -1515,92 +1606,150 @@ export default function AdminDashboard() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {completedSessions.length === 0 ? (
+                        {getPaginatedSessions().length === 0 ? (
                           <tr>
                             <td colSpan="7" className="px-6 py-8 text-center text-sm text-gray-500">
                               {errors.completedSessions ? 
                                 'Error fetching session logs. Please check API connection.' : 
-                                'No completed sessions found.'}
+                                'No sessions found for the selected filter.'}
                             </td>
                           </tr>
                         ) : (
-                          completedSessions
-                            .filter(session => sessionLogFilter === 'all' || session.status === sessionLogFilter)
-                            .map((session) => (
-                              <tr key={session.id} className="hover:bg-gray-50">
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                  #{session.id}
-                                </td>
-                                <td className="px-6 py-4">
-                                  <div className="flex items-center space-x-2">
-                                    <div className="flex -space-x-2">
-                                      <div className="h-6 w-6 rounded-full bg-blue-300 flex items-center justify-center overflow-hidden ring-2 ring-white">
-                                        {session.user1ProfilePicture ? (
-                                          <img 
-                                            src={session.user1ProfilePicture} 
-                                            alt={session.user1Name || 'User 1'} 
-                                            className="h-6 w-6 object-cover"
-                                            onError={(e) => {
-                                              e.target.src = '/default-profile.png';
-                                              e.target.onerror = null;
-                                            }}
-                                          />
-                                        ) : (
-                                          <span className="text-xs font-medium">{(session.user1Name || 'User 1').charAt(0)}</span>
-                                        )}
-                                      </div>
-                                      <div className="h-6 w-6 rounded-full bg-purple-300 flex items-center justify-center overflow-hidden ring-2 ring-white">
-                                        {session.user2ProfilePicture ? (
-                                          <img 
-                                            src={session.user2ProfilePicture} 
-                                            alt={session.user2Name || 'User 2'} 
-                                            className="h-6 w-6 object-cover"
-                                            onError={(e) => {
-                                              e.target.src = '/default-profile.png';
-                                              e.target.onerror = null;
-                                            }}
-                                          />
-                                        ) : (
-                                          <span className="text-xs font-medium">{(session.user2Name || 'User 2').charAt(0)}</span>
-                                        )}
-                                      </div>
+                          getPaginatedSessions().map((session) => (
+                            <tr key={session.id} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                #{session.id}
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex items-center space-x-2">
+                                  <div className="flex -space-x-2">
+                                    <div className="h-6 w-6 rounded-full bg-blue-300 flex items-center justify-center overflow-hidden ring-2 ring-white">
+                                      {session.user1ProfilePicture ? (
+                                        <img 
+                                          src={session.user1ProfilePicture} 
+                                          alt={session.user1Name || 'User 1'} 
+                                          className="h-6 w-6 object-cover"
+                                          onError={(e) => {
+                                            e.target.src = '/default-profile.png';
+                                            e.target.onerror = null;
+                                          }}
+                                        />
+                                      ) : (
+                                        <span className="text-xs font-medium">{(session.user1Name || 'User 1').charAt(0)}</span>
+                                      )}
                                     </div>
-                                    <div className="text-sm text-gray-900">
-                                      {session.user1Name} & {session.user2Name}
+                                    <div className="h-6 w-6 rounded-full bg-purple-300 flex items-center justify-center overflow-hidden ring-2 ring-white">
+                                      {session.user2ProfilePicture ? (
+                                        <img 
+                                          src={session.user2ProfilePicture} 
+                                          alt={session.user2Name || 'User 2'} 
+                                          className="h-6 w-6 object-cover"
+                                          onError={(e) => {
+                                            e.target.src = '/default-profile.png';
+                                            e.target.onerror = null;
+                                          }}
+                                        />
+                                      ) : (
+                                        <span className="text-xs font-medium">{(session.user2Name || 'User 2').charAt(0)}</span>
+                                      )}
                                     </div>
                                   </div>
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                  {session.topic || 'General'}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                  {formatDate(session.startedAt)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                  {formatDate(session.endedAt)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                  {calculateDuration(session.startedAt, session.endedAt)}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap">
-                                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                    session.status === 'completed' 
-                                      ? 'bg-green-100 text-green-800' 
-                                      : session.status === 'terminated' 
-                                        ? 'bg-red-100 text-red-800' 
-                                        : session.status === 'disconnected'
-                                          ? 'bg-yellow-100 text-yellow-800'
-                                          : 'bg-gray-100 text-gray-800'
-                                  }`}>
-                                    {session.status}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))
+                                  <div className="text-sm text-gray-900">
+                                    {session.user1Name} & {session.user2Name}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {session.topic || 'General'}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {formatDate(session.startedAt)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {formatDate(session.endedAt)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {calculateDuration(session.startedAt, session.endedAt)}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                  session.status === 'completed' 
+                                    ? 'bg-green-100 text-green-800' 
+                                    : session.status === 'terminated' 
+                                      ? 'bg-red-100 text-red-800' 
+                                      : session.status === 'disconnected'
+                                        ? 'bg-yellow-100 text-yellow-800'
+                                        : 'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {session.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
                         )}
                       </tbody>
                     </table>
                   </div>
+                  
+                  {/* Pagination Controls */}
+                  {getTotalPages() > 1 && (
+                    <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm text-gray-700">
+                          Showing {Math.min((currentPage - 1) * itemsPerPage + 1, getFilteredCompletedSessions().length)} to{' '}
+                          {Math.min(currentPage * itemsPerPage, getFilteredCompletedSessions().length)} of{' '}
+                          {getFilteredCompletedSessions().length} results
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <button
+                          onClick={handlePrevePage}
+                          disabled={currentPage === 1}
+                          className={`p-2 rounded-md text-sm font-medium ${
+                            currentPage === 1
+                              ? 'text-gray-400 cursor-not-allowed'
+                              : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          <FiChevronLeft className="h-4 w-4" />
+                        </button>
+                        
+                        {/* Page numbers */}
+                        {Array.from({ length: Math.min(5, getTotalPages()) }, (_, i) => {
+                          const startPage = Math.max(1, currentPage - 2);
+                          const pageNumber = startPage + i;
+                          
+                          if (pageNumber > getTotalPages()) return null;
+                          
+                          return (
+                            <button
+                              key={pageNumber}
+                              onClick={() => handlePageClick(pageNumber)}
+                              className={`px-3 py-1 rounded-md text-sm font-medium ${
+                                currentPage === pageNumber
+                                  ? 'bg-blue-500 text-white'
+                                  : 'text-gray-700 hover:bg-gray-100'
+                              }`}
+                            >
+                              {pageNumber}
+                            </button>
+                          );
+                        })}
+                        
+                        <button
+                          onClick={handleNextPage}
+                          disabled={currentPage === getTotalPages()}
+                          className={`p-2 rounded-md text-sm font-medium ${
+                            currentPage === getTotalPages()
+                              ? 'text-gray-400 cursor-not-allowed'
+                              : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          <FiChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="px-6 py-4 border-t border-gray-200">
                     <h3 className="text-sm font-medium text-gray-700 mb-3">Session Statistics</h3>

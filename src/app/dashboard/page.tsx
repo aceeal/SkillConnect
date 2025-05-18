@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { FiSearch, FiVideo, FiMessageSquare, FiStar, FiUser, FiClock, FiFilter, FiBookOpen, FiTool } from 'react-icons/fi';
+import { FiSearch, FiVideo, FiMessageSquare, FiStar, FiUser, FiClock, FiFilter, FiBookOpen, FiTool, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
 import { getGlobalSocket } from '@/app/components/GlobalCallHandler';
 
 // Create a global function to open chat that pages can use
@@ -33,6 +33,11 @@ export default function DashboardPage() {
   const [favorites, setFavorites] = useState([]);
   const [socketConnected, setSocketConnected] = useState(false);
   const [socketError, setSocketError] = useState('');
+  
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [usersPerPage] = useState(10); // You can make this adjustable if needed
+  
   const [stats, setStats] = useState({
     totalUsers: 0,
     onlineUsers: 0,
@@ -225,6 +230,9 @@ export default function DashboardPage() {
         onlineUsers: data.users.filter(user => user.onlineStatus === 'online').length,
       }));
       
+      // Reset to first page when users change
+      setCurrentPage(1);
+      
     } catch (error) {
       console.error('Error fetching users:', error);
     } finally {
@@ -281,7 +289,33 @@ export default function DashboardPage() {
     }
     
     setFilteredUsers(filtered);
+    
+    // Reset to first page when filters change
+    setCurrentPage(1);
   }, [users, activeFilter, favorites, searchTerm]);
+
+  // Pagination logic
+  const getPaginatedUsers = () => {
+    const startIndex = (currentPage - 1) * usersPerPage;
+    const endIndex = startIndex + usersPerPage;
+    return filteredUsers.slice(startIndex, endIndex);
+  };
+
+  const getTotalPages = () => {
+    return Math.ceil(filteredUsers.length / usersPerPage);
+  };
+
+  const handlePrevePage = () => {
+    setCurrentPage(prev => Math.max(prev - 1, 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage(prev => Math.min(prev + 1, getTotalPages()));
+  };
+
+  const handlePageClick = (pageNumber) => {
+    setCurrentPage(pageNumber);
+  };
 
   const formatTimeAgo = (dateString) => {
     if (!dateString) return 'Never';
@@ -603,134 +637,196 @@ export default function DashboardPage() {
               </div>
             </div>
           ) : (
-            <ul className="divide-y divide-gray-200">
-              {filteredUsers.map((user, index) => {
-                const isFavorite = favorites.includes(user.id);
-                return (
-                <li key={`${user.id}-${index}`} className={`hover:bg-gray-50 transition-colors duration-150 ${isFavorite ? 'bg-yellow-50' : ''}`}>
-                  <div className="px-4 py-4 sm:px-6">
-                    <div className="flex items-center justify-between">
-                      <div 
-                        className="flex items-center cursor-pointer p-2 rounded-md" 
-                        onClick={() => navigateToProfile(user.id)}
-                      >
-                        <div className="relative">
-                          <img 
-                            src={user.profilePicture} 
-                            alt={`${user.name}'s avatar`} 
-                            className={`h-12 w-12 rounded-full object-cover border-2 ${isFavorite ? 'border-yellow-400' : 'border-gray-200'}`}
-                            onError={(e) => {
-                              e.currentTarget.src = '/default-profile.png';
-                            }}
-                          />
-                          {/* FIXED: using onlineStatus instead of status */}
-                          <span className={`absolute bottom-0 right-0 block h-3 w-3 rounded-full ring-2 ring-white ${
-                            user.onlineStatus === 'online' ? 'bg-green-400' : 'bg-gray-300'
-                          }`}></span>
-                        </div>
-                        <div className="ml-4">
-                          <div className="flex items-center">
-                            <h4 className="text-sm font-medium text-gray-900">{user.name}</h4>
-                            {isFavorite && (
-                              <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                <FiStar className="h-3 w-3 mr-1 text-yellow-500 fill-current" />
-                                Favorite
-                              </span>
-                            )}
+            <>
+              <ul className="divide-y divide-gray-200">
+                {getPaginatedUsers().map((user, index) => {
+                  const isFavorite = favorites.includes(user.id);
+                  return (
+                  <li key={`${user.id}-${index}`} className={`hover:bg-gray-50 transition-colors duration-150 ${isFavorite ? 'bg-yellow-50' : ''}`}>
+                    <div className="px-4 py-4 sm:px-6">
+                      <div className="flex items-center justify-between">
+                        <div 
+                          className="flex items-center cursor-pointer p-2 rounded-md" 
+                          onClick={() => navigateToProfile(user.id)}
+                        >
+                          <div className="relative">
+                            <img 
+                              src={user.profilePicture} 
+                              alt={`${user.name}'s avatar`} 
+                              className={`h-12 w-12 rounded-full object-cover border-2 ${isFavorite ? 'border-yellow-400' : 'border-gray-200'}`}
+                              onError={(e) => {
+                                e.currentTarget.src = '/default-profile.png';
+                              }}
+                            />
                             {/* FIXED: using onlineStatus instead of status */}
-                            <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                              user.onlineStatus === 'online' 
-                                ? 'bg-green-100 text-green-800'
-                                : 'bg-gray-100 text-gray-800'
-                            }`}>
-                              {user.onlineStatus}
-                            </span>
+                            <span className={`absolute bottom-0 right-0 block h-3 w-3 rounded-full ring-2 ring-white ${
+                              user.onlineStatus === 'online' ? 'bg-green-400' : 'bg-gray-300'
+                            }`}></span>
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Last active: {formatTimeAgo(user.lastActive)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => handleStartCall(user.id, user.name, user.profilePicture)}
-                          className={`inline-flex items-center p-2 border shadow-sm text-sm leading-4 font-medium rounded-md ${
-                            user.onlineStatus === 'online' // FIXED: using onlineStatus instead of status
-                              ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' 
-                              : 'border-gray-300 text-gray-400 cursor-not-allowed'
-                          }`}
-                          title="Start video call"
-                          disabled={user.onlineStatus !== 'online'} // FIXED: using onlineStatus instead of status
-                        >
-                          <FiVideo className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => handleSendMessage(user.id)}
-                          className="inline-flex items-center p-2 border border-blue-300 shadow-sm text-sm leading-4 font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100"
-                          title="Send message"
-                        >
-                          <FiMessageSquare className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation(); // Prevent triggering profile navigation
-                            handleAddFavorite(user.id);
-                          }}
-                          className={`inline-flex items-center p-2 border shadow-sm text-sm leading-4 font-medium rounded-md ${
-                            isFavorite 
-                              ? 'border-yellow-400 bg-yellow-100 text-yellow-700' 
-                              : 'border-gray-300 bg-white text-gray-600 hover:bg-yellow-50'
-                          }`}
-                          title={isFavorite ? "Remove from favorites" : "Add to favorites"}
-                        >
-                          <FiStar className={`h-4 w-4 ${isFavorite ? 'text-yellow-500 fill-current' : ''}`} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {/* Skills Section - What they can teach */}
-                      <div className="flex flex-col">
-                        <div className="flex items-center mb-1">
-                          <FiTool className="h-4 w-4 text-green-600 mr-1" />
-                          <span className="text-xs font-medium text-gray-700">Can Teach:</span>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {user.skills && user.skills.length > 0 ? (
-                            user.skills.map((skill, index) => (
-                              <span key={index} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 border border-green-200">
-                                {skill}
+                          <div className="ml-4">
+                            <div className="flex items-center">
+                              <h4 className="text-sm font-medium text-gray-900">{user.name}</h4>
+                              {isFavorite && (
+                                <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                  <FiStar className="h-3 w-3 mr-1 text-yellow-500 fill-current" />
+                                  Favorite
+                                </span>
+                              )}
+                              {/* FIXED: using onlineStatus instead of status */}
+                              <span className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                user.onlineStatus === 'online' 
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-gray-100 text-gray-800'
+                              }`}>
+                                {user.onlineStatus}
                               </span>
-                            ))
-                          ) : (
-                            <span className="text-xs text-gray-500 italic">No skills listed</span>
-                          )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Last active: {formatTimeAgo(user.lastActive)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex space-x-2">
+                          <button
+                            onClick={() => handleStartCall(user.id, user.name, user.profilePicture)}
+                            className={`inline-flex items-center p-2 border shadow-sm text-sm leading-4 font-medium rounded-md ${
+                              user.onlineStatus === 'online' // FIXED: using onlineStatus instead of status
+                                ? 'border-green-300 text-green-700 bg-green-50 hover:bg-green-100' 
+                                : 'border-gray-300 text-gray-400 cursor-not-allowed'
+                            }`}
+                            title="Start video call"
+                            disabled={user.onlineStatus !== 'online'} // FIXED: using onlineStatus instead of status
+                          >
+                            <FiVideo className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleSendMessage(user.id)}
+                            className="inline-flex items-center p-2 border border-blue-300 shadow-sm text-sm leading-4 font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100"
+                            title="Send message"
+                          >
+                            <FiMessageSquare className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent triggering profile navigation
+                              handleAddFavorite(user.id);
+                            }}
+                            className={`inline-flex items-center p-2 border shadow-sm text-sm leading-4 font-medium rounded-md ${
+                              isFavorite 
+                                ? 'border-yellow-400 bg-yellow-100 text-yellow-700' 
+                                : 'border-gray-300 bg-white text-gray-600 hover:bg-yellow-50'
+                            }`}
+                            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                          >
+                            <FiStar className={`h-4 w-4 ${isFavorite ? 'text-yellow-500 fill-current' : ''}`} />
+                          </button>
                         </div>
                       </div>
 
-                      {/* Interests Section - What they want to learn */}
-                      <div className="flex flex-col">
-                        <div className="flex items-center mb-1">
-                          <FiBookOpen className="h-4 w-4 text-purple-600 mr-1" />
-                          <span className="text-xs font-medium text-gray-700">Wants to Learn:</span>
+                      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/* Skills Section - What they can teach */}
+                        <div className="flex flex-col">
+                          <div className="flex items-center mb-1">
+                            <FiTool className="h-4 w-4 text-green-600 mr-1" />
+                            <span className="text-xs font-medium text-gray-700">Can Teach:</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {user.skills && user.skills.length > 0 ? (
+                              user.skills.map((skill, index) => (
+                                <span key={index} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+                                  {skill}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-gray-500 italic">No skills listed</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {user.interests && user.interests.length > 0 ? (
-                            user.interests.map((interest, index) => (
-                              <span key={index} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
-                                {interest}
-                              </span>
-                            ))
-                          ) : (
-                            <span className="text-xs text-gray-500 italic">No interests listed</span>
-                          )}
+
+                        {/* Interests Section - What they want to learn */}
+                        <div className="flex flex-col">
+                          <div className="flex items-center mb-1">
+                            <FiBookOpen className="h-4 w-4 text-purple-600 mr-1" />
+                            <span className="text-xs font-medium text-gray-700">Wants to Learn:</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {user.interests && user.interests.length > 0 ? (
+                              user.interests.map((interest, index) => (
+                                <span key={index} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 border border-purple-200">
+                                  {interest}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-xs text-gray-500 italic">No interests listed</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
+                  </li>
+                )})}
+              </ul>
+              
+              {/* Pagination Controls */}
+              {getTotalPages() > 1 && (
+                <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm text-gray-700">
+                      Showing {Math.min((currentPage - 1) * usersPerPage + 1, filteredUsers.length)} to{' '}
+                      {Math.min(currentPage * usersPerPage, filteredUsers.length)} of{' '}
+                      {filteredUsers.length} results
+                    </span>
                   </div>
-                </li>
-              )})}
-            </ul>
+                  <div className="flex items-center space-x-1">
+                    <button
+                      onClick={handlePrevePage}
+                      disabled={currentPage === 1}
+                      className={`p-2 rounded-md text-sm font-medium ${
+                        currentPage === 1
+                          ? 'text-gray-400 cursor-not-allowed'
+                          : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      <FiChevronLeft className="h-4 w-4" />
+                    </button>
+                    
+                    {/* Page numbers */}
+                    {Array.from({ length: Math.min(5, getTotalPages()) }, (_, i) => {
+                      const startPage = Math.max(1, currentPage - 2);
+                      const pageNumber = startPage + i;
+                      
+                      if (pageNumber > getTotalPages()) return null;
+                      
+                      return (
+                        <button
+                          key={pageNumber}
+                          onClick={() => handlePageClick(pageNumber)}
+                          className={`px-3 py-1 rounded-md text-sm font-medium ${
+                            currentPage === pageNumber
+                              ? 'bg-blue-500 text-white'
+                              : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                        >
+                          {pageNumber}
+                        </button>
+                      );
+                    })}
+                    
+                    <button
+                      onClick={handleNextPage}
+                      disabled={currentPage === getTotalPages()}
+                      className={`p-2 rounded-md text-sm font-medium ${
+                        currentPage === getTotalPages()
+                          ? 'text-gray-400 cursor-not-allowed'
+                          : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      <FiChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
