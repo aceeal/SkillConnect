@@ -1032,7 +1032,7 @@ app.prepare().then(() => {
       }
     });
     
-    // Handle end_session event
+    // Handle session end properly - ensure users remain online
     socket.on('end_session', async (data) => {
       const { roomId, status } = data;
       
@@ -1045,6 +1045,38 @@ app.prepare().then(() => {
         await updateSessionInDatabase(roomId, status || 'completed');
         
         console.log(`Session ${roomId} ended with status: ${status || 'completed'}`);
+        
+        // IMPORTANT: Ensure both users are still marked as online
+        const session = activeSessions[roomId];
+        
+        // Re-authenticate both users to ensure they're properly in onlineUsers
+        if (session.user1Id && !onlineUsers[session.user1Id]) {
+          // Find the user's socket and re-add them
+          const user1Socket = Array.from(io.sockets.sockets.values()).find(s => s.handshake.auth.userId === session.user1Id);
+          if (user1Socket) {
+            onlineUsers[session.user1Id] = {
+              socketId: user1Socket.id,
+              userName: session.user1Name,
+              status: 'online',
+              dbId: session.user1Id
+            };
+            console.log(`Re-added user ${session.user1Id} to online users after session end`);
+          }
+        }
+        
+        if (session.user2Id && !onlineUsers[session.user2Id]) {
+          // Find the user's socket and re-add them
+          const user2Socket = Array.from(io.sockets.sockets.values()).find(s => s.handshake.auth.userId === session.user2Id);
+          if (user2Socket) {
+            onlineUsers[session.user2Id] = {
+              socketId: user2Socket.id,
+              userName: session.user2Name,
+              status: 'online',
+              dbId: session.user2Id
+            };
+            console.log(`Re-added user ${session.user2Id} to online users after session end`);
+          }
+        }
         
         // Send update to admin dashboard
         io.emit('admin-session-update', { activeSessions, sessionStats });
@@ -1098,12 +1130,59 @@ app.prepare().then(() => {
       const { callId, callerId, callerName, callerPicture, calleeId } = data;
       
       console.log(`Call initiated: ${callId} from ${callerId} to ${calleeId}`);
+      console.log('Current online users:', Object.keys(onlineUsers));
       
-      // Get the recipient's socketId
-      const recipientSocketId = onlineUsers[calleeId]?.socketId;
+      // First, try to find recipient by exact user ID match
+      let recipientSocketId = onlineUsers[calleeId]?.socketId;
+      
+      // If not found by direct ID, search through all online users
+      if (!recipientSocketId) {
+        console.log(`User ${calleeId} not found in onlineUsers, searching...`);
+        
+        // Search by socket ID (in case calleeId is actually a socket ID)
+        for (const [userId, userData] of Object.entries(onlineUsers)) {
+          if (userData.socketId === calleeId) {
+            recipientSocketId = calleeId;
+            console.log(`Found recipient by socket ID: ${calleeId}`);
+            break;
+          }
+        }
+        
+        // Search by user ID (in case the mapping is inconsistent)
+        if (!recipientSocketId) {
+          for (const [userId, userData] of Object.entries(onlineUsers)) {
+            if (userId === calleeId || userData.dbId === calleeId) {
+              recipientSocketId = userData.socketId;
+              console.log(`Found recipient by user search: ${userId} -> ${recipientSocketId}`);
+              break;
+            }
+          }
+        }
+      }
+      
+      console.log(`Final recipient socket ID: ${recipientSocketId}`);
       
       if (!recipientSocketId) {
+        console.log(`Recipients not found for ${calleeId}. Available users:`, Object.keys(onlineUsers));
         // Recipient is not online, send call_declined event to caller
+        socket.emit('call_declined', { 
+          callId, 
+          message: 'User is not available'
+        });
+        return;
+      }
+      
+      // Check if recipient socket is actually connected
+      const recipientSocket = io.sockets.sockets.get(recipientSocketId);
+      if (!recipientSocket || !recipientSocket.connected) {
+        console.log(`Recipient socket ${recipientSocketId} is not connected`);
+        // Clean up the online users entry
+        Object.keys(onlineUsers).forEach(userId => {
+          if (onlineUsers[userId].socketId === recipientSocketId) {
+            delete onlineUsers[userId];
+          }
+        });
+        
         socket.emit('call_declined', { 
           callId, 
           message: 'User is not available'
@@ -1118,6 +1197,8 @@ app.prepare().then(() => {
         callerName,
         callerPicture
       });
+      
+      console.log(`Call notification sent to ${recipientSocketId}`);
     });
 
     // Handle call acceptance - this is different from the existing accept_call event

@@ -333,45 +333,47 @@ export default function DashboardPage() {
   // Handle starting a call - this uses the exposed window.initiateCall function from CallModals
   // Improved handleStartCall function for dashboard page
   const handleStartCall = (userId, userName, userImage) => {
-    // Get current socket status
+    console.log('=== DASHBOARD CALL DEBUG ===');
+    console.log('Attempting to call:', userId, userName);
+    
+    // Check socket first
     const socket = getGlobalSocket();
+    console.log('Socket exists:', !!socket);
+    console.log('Socket connected:', socket?.connected);
     
     if (!socket || !socket.connected) {
-      alert('Unable to make calls at this time. Please check your connection and try again later.');
+      alert('Unable to make calls - not connected to server. Please refresh the page.');
       return;
     }
     
-    // Enhanced check for call system readiness
-    const checkAndInitiateCall = (retryCount = 0) => {
-      // First check if the global function exists
-      if (typeof window !== 'undefined' && window.initiateCall) {
+    // Check if global function exists
+    console.log('Window initiateCall exists:', !!window.initiateCall);
+    console.log('Window initiateCallReady:', window.initiateCallReady);
+    
+    // Simple retry mechanism
+    const attemptCall = (attempt = 1) => {
+      if (window.initiateCall && window.initiateCallReady) {
+        console.log(`Attempt ${attempt}: Calling window.initiateCall`);
         try {
-          console.log('Attempting to initiate call to:', userId, userName);
           const success = window.initiateCall(userId.toString(), userName, userImage);
+          console.log('Call result:', success);
           if (!success) {
-            alert('Unable to start call. The user might be offline or busy.');
+            alert('Failed to start call. User might be offline or busy.');
           }
-          return;
         } catch (error) {
-          console.error('Error starting call:', error);
+          console.error('Error calling initiateCall:', error);
           alert('Error starting call: ' + error.message);
-          return;
         }
-      }
-      
-      // If function doesn't exist, check if we should retry
-      if (retryCount < 5) { // Increased retry count
-        console.log(`Call system not ready, retrying... (${retryCount + 1}/5)`);
-        setTimeout(() => {
-          checkAndInitiateCall(retryCount + 1);
-        }, (retryCount + 1) * 300); // Progressive delays: 300ms, 600ms, 900ms, etc.
+      } else if (attempt <= 3) {
+        console.log(`Attempt ${attempt}: Function not ready, retrying in 500ms...`);
+        setTimeout(() => attemptCall(attempt + 1), 500);
       } else {
-        console.error('Call system failed to initialize after multiple attempts');
-        alert('Call system is not ready. Please refresh the page and try again.');
+        console.error('Call function not available after 3 attempts');
+        alert('Call system not ready. Please try again in a moment.');
       }
     };
     
-    checkAndInitiateCall();
+    attemptCall();
   };
 
   // Enhanced handle send message function that opens the chat with the user
