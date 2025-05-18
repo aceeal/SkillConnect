@@ -32,6 +32,7 @@ function LiveSessionPageContent() {
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
+  const blackCanvasRef = useRef(null); // Add ref for black canvas
   
   // UI states
   const [isConnecting, setIsConnecting] = useState(true);
@@ -168,6 +169,22 @@ function LiveSessionPageContent() {
   const addLog = (message) => {
     console.log(message);
     setLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`]);
+  };
+  
+  // Function to create black canvas track
+  const createBlackCanvasTrack = () => {
+    const blackCanvas = document.createElement('canvas');
+    blackCanvas.width = 640;
+    blackCanvas.height = 480;
+    const ctx = blackCanvas.getContext('2d');
+    ctx.fillStyle = 'black';
+    ctx.fillRect(0, 0, blackCanvas.width, blackCanvas.height);
+    
+    // Store canvas reference for cleanup
+    blackCanvasRef.current = blackCanvas;
+    
+    const blackStream = blackCanvas.captureStream();
+    return blackStream.getVideoTracks()[0];
   };
   
   // Scroll to bottom of chat when messages change
@@ -726,29 +743,25 @@ function LiveSessionPageContent() {
           // If camera should be off initially OR we don't have a camera
           addLog('Setting initial camera state to OFF (user preference or no camera)');
           
-          // If we have video tracks, stop them and replace with black canvas
+          // Remove any existing video tracks first
           const videoTracks = stream.getVideoTracks();
-          if (videoTracks.length > 0) {
-            const videoTrack = videoTracks[0];
-            videoTrack.stop();
-            stream.removeTrack(videoTrack);
-          }
+          videoTracks.forEach(track => {
+            track.stop();
+            stream.removeTrack(track);
+          });
           
-          // Create a black canvas track for replacement
-          const blackCanvas = document.createElement('canvas');
-          blackCanvas.width = 640;
-          blackCanvas.height = 480;
-          const ctx = blackCanvas.getContext('2d');
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, blackCanvas.width, blackCanvas.height);
-          
-          // Create black track
-          const blackStream = blackCanvas.captureStream();
-          const blackTrack = blackStream.getVideoTracks()[0];
+          // Create and add black canvas track
+          const blackTrack = createBlackCanvasTrack();
           stream.addTrack(blackTrack);
           
           // Update UI state
           setIsCameraOn(false);
+        } else {
+          // Camera should be on - ensure it's enabled
+          const videoTracks = stream.getVideoTracks();
+          if (videoTracks.length > 0) {
+            videoTracks[0].enabled = true;
+          }
         }
         
         // Set local video stream
@@ -1024,6 +1037,11 @@ function LiveSessionPageContent() {
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach(track => track.stop());
       }
+      
+      // Clean up black canvas if it exists
+      if (blackCanvasRef.current) {
+        blackCanvasRef.current = null;
+      }
     };
   }, [session, roomId, status, localUserProfile, settingsLoaded]);
   
@@ -1048,56 +1066,40 @@ function LiveSessionPageContent() {
         addLog('Turning camera off...');
         
         if (localStreamRef.current) {
+          // Remove existing video tracks
           const videoTracks = localStreamRef.current.getVideoTracks();
-          if (videoTracks.length > 0) {
-            const videoTrack = videoTracks[0];
+          videoTracks.forEach(track => {
+            track.stop();
+            localStreamRef.current.removeTrack(track);
+          });
+          
+          // Create black canvas track
+          const blackTrack = createBlackCanvasTrack();
+          localStreamRef.current.addTrack(blackTrack);
+          
+          // Update local video display
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = localStreamRef.current;
+          }
+          
+          // Replace track in peer connection
+          if (peerConnectionRef.current) {
+            const senders = peerConnectionRef.current.getSenders();
+            const videoSender = senders.find(sender => sender.track?.kind === 'video');
             
-            // Actually stop the camera track completely
-            videoTrack.stop();
-            
-            // Remove it from the stream
-            localStreamRef.current.removeTrack(videoTrack);
-            
-            // Create a "black" video track to replace the camera
-            // This ensures the remote user sees us as off, not frozen
-            const blackCanvas = document.createElement('canvas');
-            blackCanvas.width = 640;
-            blackCanvas.height = 480;
-            const ctx = blackCanvas.getContext('2d');
-            ctx.fillStyle = 'black';
-            ctx.fillRect(0, 0, blackCanvas.width, blackCanvas.height);
-            
-            // Convert the canvas to a video stream
-            const blackStream = blackCanvas.captureStream();
-            const blackTrack = blackStream.getVideoTracks()[0];
-            
-            // Update local video display with the black track
-            if (localVideoRef.current) {
-              const tempStream = new MediaStream();
-              tempStream.addTrack(blackTrack);
-              localVideoRef.current.srcObject = tempStream;
-            }
-            
-            // Replace the track in the peer connection with the black track
-            if (peerConnectionRef.current) {
-              const senders = peerConnectionRef.current.getSenders();
-              const videoSender = senders.find(sender => sender.track?.kind === 'video');
-              
-              if (videoSender) {
-                try {
-                  // Replace with black track instead of null
-                  await videoSender.replaceTrack(blackTrack);
-                  addLog('Replaced video track with black track in peer connection');
-                } catch (error) {
-                  addLog(`Error replacing video track: ${error.message}`);
-                }
+            if (videoSender) {
+              try {
+                await videoSender.replaceTrack(blackTrack);
+                addLog('Replaced video track with black track in peer connection');
+              } catch (error) {
+                addLog(`Error replacing video track with black: ${error.message}`);
               }
             }
-            
-            // Update UI state
-            setIsCameraOn(false);
-            addLog('Camera turned off successfully');
           }
+          
+          // Update UI state
+          setIsCameraOn(false);
+          addLog('Camera turned off successfully');
         }
       } else {
         // TURN CAMERA ON
@@ -1110,45 +1112,42 @@ function LiveSessionPageContent() {
           
           addLog('New video track acquired');
           
-          // If localStreamRef doesn't exist, create a new one
-          if (!localStreamRef.current) {
-            const existingAudioTracks = [];
+          if (localStreamRef.current) {
+            // Remove existing video tracks (including black canvas track)
+            const existingVideoTracks = localStreamRef.current.getVideoTracks();
+            existingVideoTracks.forEach(track => {
+              track.stop();
+              localStreamRef.current.removeTrack(track);
+            });
+            
+            // Add the new camera track
+            localStreamRef.current.addTrack(newVideoTrack);
+            
+            // Update local video display
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = localStreamRef.current;
+              addLog('Updated local video display with camera');
+            }
+            
+            // Replace track in peer connection
             if (peerConnectionRef.current) {
-              const audioSender = peerConnectionRef.current.getSenders().find(s => s.track?.kind === 'audio');
-              if (audioSender && audioSender.track) {
-                existingAudioTracks.push(audioSender.track);
+              const senders = peerConnectionRef.current.getSenders();
+              const videoSender = senders.find(sender => sender.track?.kind === 'video');
+              
+              if (videoSender) {
+                await videoSender.replaceTrack(newVideoTrack);
+                addLog('Replaced black track with camera track in peer connection');
+              } else {
+                // If no video sender exists, add a new track
+                peerConnectionRef.current.addTrack(newVideoTrack, localStreamRef.current);
+                addLog('Added new video track to peer connection');
               }
             }
-            localStreamRef.current = new MediaStream([...existingAudioTracks, newVideoTrack]);
-          } else {
-            // Add the new track to our stream
-            localStreamRef.current.addTrack(newVideoTrack);
-          }
-          
-          // Update local video display
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = localStreamRef.current;
-            addLog('Updated local video display');
-          }
-          
-          // Replace the track in the peer connection
-          if (peerConnectionRef.current) {
-            const senders = peerConnectionRef.current.getSenders();
-            const videoSender = senders.find(sender => sender.track?.kind === 'video');
             
-            if (videoSender) {
-              await videoSender.replaceTrack(newVideoTrack);
-              addLog('Replaced video track in peer connection');
-            } else {
-              // If no video sender exists, add a new track
-              peerConnectionRef.current.addTrack(newVideoTrack, localStreamRef.current);
-              addLog('Added new video track to peer connection');
-            }
+            // Update UI state
+            setIsCameraOn(true);
+            addLog('Camera turned on successfully');
           }
-          
-          // Update UI state
-          setIsCameraOn(true);
-          addLog('Camera turned on successfully');
         } catch (error) {
           addLog(`Error turning on camera: ${error.message}`);
           console.error('Camera restart error:', error);
@@ -1352,6 +1351,11 @@ function LiveSessionPageContent() {
     // Disconnect socket
     if (socketRef.current) {
       socketRef.current.disconnect();
+    }
+    
+    // Clean up black canvas
+    if (blackCanvasRef.current) {
+      blackCanvasRef.current = null;
     }
     
     // Redirect to dashboard or connect page
