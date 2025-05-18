@@ -1,8 +1,8 @@
 // src/app/api/users/route.ts
 import { NextResponse } from 'next/server';
-import { executeQuery } from '../../../../lib/db';
+import { executeQuery } from '../../../../../lib/db';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '../auth/[...nextauth]/route';
+import { authOptions } from '../../auth/[...nextauth]/route';
 
 export async function GET(request: Request) {
   try {
