@@ -8,6 +8,7 @@ import { Providers } from './providers';
 import GlobalCallHandler from '@/app/components/GlobalCallHandler';
 import ChatBubble from '@/app/components/chat';
 import SessionCheck from '@/app/components/SessionCheck';
+import NotificationSystem from '@/app/components/NotificationSystem';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -38,6 +39,7 @@ export default function RootLayout({
         <Providers>
           <SessionCheck />
           <GlobalCallHandler />
+          <NotificationSystem />
           <Navbar />
           {children}
           <Footer />

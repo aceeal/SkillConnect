@@ -1,3 +1,4 @@
+// src/app/components/navbar.tsx
 'use client';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -5,6 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import { FiUser, FiSettings, FiLogOut } from 'react-icons/fi';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import NotificationDropdown from './NotificationDropdown';
 
 export default function Navbar() {
   const { data: session, status } = useSession();
@@ -110,7 +112,7 @@ export default function Navbar() {
         </div>
 
         {/* Right Side: Navigation Links */}
-        <div className="flex items-center space-x-8">
+        <div className="flex items-center space-x-6">
           <Link
             href="/"
             className="text-gray-800 hover:text-blue-600 font-medium transition duration-300 relative group"
@@ -133,6 +135,16 @@ export default function Navbar() {
               </Link>
             )
           )}
+
+          {/* Notifications - Show for authenticated users */}
+          {user ? (
+            <NotificationDropdown isLoading={isLoading} />
+          ) : isLoading ? (
+            /* Notification skeleton loading */
+            <div className="relative p-2">
+              <div className="w-6 h-6 bg-gray-200 rounded animate-pulse"></div>
+            </div>
+          ) : null}
 
           {/* Profile or Login Button - Show placeholder during loading */}
           {isLoading ? (

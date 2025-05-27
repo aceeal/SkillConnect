@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { FiSearch, FiVideo, FiMessageSquare, FiStar, FiUser, FiClock, FiFilter, FiBookOpen, FiTool, FiChevronLeft, FiChevronRight } from 'react-icons/fi';
+import { FiSearch, FiVideo, FiMessageSquare, FiStar, FiUser, FiClock, FiFilter, FiBookOpen, FiTool, FiChevronLeft, FiChevronRight, FiCalendar } from 'react-icons/fi';
 import { getGlobalSocket } from '@/app/components/GlobalCallHandler';
+import SessionBookingModal from '@/app/components/SessionBookingModal';
 
 // Create a global function to open chat that pages can use
 if (typeof window !== 'undefined' && !window.openChatWithUser) {
@@ -33,6 +34,10 @@ export default function DashboardPage() {
   const [favorites, setFavorites] = useState([]);
   const [socketConnected, setSocketConnected] = useState(false);
   const [socketError, setSocketError] = useState('');
+  
+  // Session booking modal state
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
+  const [selectedUserForBooking, setSelectedUserForBooking] = useState(null);
   
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -376,6 +381,16 @@ export default function DashboardPage() {
     attemptCall();
   };
 
+  // Handle session booking
+  const handleBookSession = (user) => {
+    setSelectedUserForBooking({
+      id: user.id,
+      name: user.name,
+      profilePicture: user.profilePicture || '/default-profile.png'
+    });
+    setIsBookingModalOpen(true);
+  };
+
   // Enhanced handle send message function that opens the chat with the user
   const handleSendMessage = (userId) => {
     // Find the user data we need
@@ -702,6 +717,13 @@ export default function DashboardPage() {
                             <FiVideo className="h-4 w-4" />
                           </button>
                           <button
+                            onClick={() => handleBookSession(user)}
+                            className="inline-flex items-center p-2 border border-purple-300 shadow-sm text-sm leading-4 font-medium rounded-md text-purple-700 bg-purple-50 hover:bg-purple-100"
+                            title="Book a session"
+                          >
+                            <FiCalendar className="h-4 w-4" />
+                          </button>
+                          <button
                             onClick={() => handleSendMessage(user.id)}
                             className="inline-flex items-center p-2 border border-blue-300 shadow-sm text-sm leading-4 font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100"
                             title="Send message"
@@ -832,6 +854,16 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Session Booking Modal */}
+      <SessionBookingModal
+        isOpen={isBookingModalOpen}
+        onClose={() => {
+          setIsBookingModalOpen(false);
+          setSelectedUserForBooking(null);
+        }}
+        targetUser={selectedUserForBooking || { id: 0, name: '', profilePicture: '' }}
+      />
       
       {/* Script to initialize the global chat opener */}
       <script dangerouslySetInnerHTML={{

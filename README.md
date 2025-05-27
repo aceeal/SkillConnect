@@ -114,9 +114,6 @@ NEXTAUTH_SECRET=your_production_secret
 
 2. **Import Schema**
    Use the provided `skillconnect.sql` file to set up the database structure:
-   ```bash
-   mysql -u root -p skillconnect < skillconnect.sql
-   ```
 
 3. **Database Tables**
    The schema includes:
@@ -157,7 +154,7 @@ NEXTAUTH_SECRET=your_production_secret
 
 2. **Start the production server**
    ```bash
-   npm start
+   npm run dev
    ```
 
 ## 📱 Usage
@@ -197,57 +194,12 @@ NEXTAUTH_SECRET=your_production_secret
 
 3. **Monitor Sessions**
    - View active sessions
-   - Terminate sessions if needed
    - Access session analytics
 
 4. **Handle Reports**
    - Review user reports
    - Take appropriate actions
    - Update report statuses
-
-## 🧪 Testing
-
-```bash
-# Run tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Run test coverage
-npm run test:coverage
-```
-
-## 📂 Project Structure
-
-```
-skillconnect/
-├── src/
-│   ├── app/
-│   │   ├── api/           # API routes
-│   │   ├── components/    # React components
-│   │   ├── admin-dashboard/ # Admin panel
-│   │   ├── live-session/  # Video session pages
-│   │   └── ...           # Other pages
-│   ├── lib/              # Utility libraries
-│   └── types/            # TypeScript definitions
-├── public/               # Static assets
-├── server.js            # Custom server with Socket.io
-├── next.config.ts       # Next.js configuration
-└── package.json         # Dependencies
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🐛 Known Issues
 
@@ -257,7 +209,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-For support, email support@skillconnect.com or create an issue in this repository.
+For support, email skillconnectcapstone@gmail.com or create an issue in this repository.
 
 ## 🙏 Acknowledgments
 
