@@ -1,5 +1,6 @@
 # SkillConnect
 
+To visit the site kindly check "skillconnect.cc"
 A peer-to-peer skill sharing platform that connects learners and mentors in real-time video sessions.
 
 ## 🌟 Features
@@ -35,7 +36,7 @@ Before you begin, ensure you have installed:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/skillconnect.git
+   git clone https://github.com/aceeal/SkillConnect
    cd skillconnect
    ```
 
@@ -209,14 +210,4 @@ NEXTAUTH_SECRET=your_production_secret
 
 ## 📞 Support
 
-For support, email skillconnectcapstone@gmail.com or create an issue in this repository.
-
-## 🙏 Acknowledgments
-
-- Thanks to all contributors who helped build this platform
-- Special thanks to the open-source community for the amazing tools and libraries
-- Inspired by the power of peer-to-peer learning
-
----
-
-**Built with ❤️ by the SkillConnect Team**
+For support, email skillconnectcapstone@gmail.com or johnacealbao@gmail.com
